@@ -1,10 +1,8 @@
-# torch
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+# %%
 # huggingface
 from transformers import AutoTokenizer, DataCollatorWithPadding, AutoModelForSequenceClassification, TrainingArguments, Trainer
 from datasets import load_dataset
+from evaluate import load
 # others
 # import matplotlib.pyplot as plt
 from datetime import datetime
@@ -78,11 +76,50 @@ token_data = token_data.remove_columns(["DMS_score", "mutant", "mutated_sequence
 token_data = token_data.rename_column("DMS_score_bin", "labels")
 
 # Split the train dataset into train, valid, and test subsets
-dict_train_test = token_data.train_test_split(test_size=0.4, shuffle=True)
+dict_train_test = token_data['train'].train_test_split(test_size=0.4, shuffle=True)
 train_dataset = dict_train_test['train']
 test_dataset = dict_train_test['test']
 # # here we could split into validation and test
 # dict_test_valid = test_dataset.train_test_split(test_size=0.5, shuffle=True)
 # test_dataset = dict_test_valid['test']
 # valid_dataset = dict_test_valid['train']
+# %%  taken from facebooks pretrained-finetuning notebook here: 
+# https://colab.research.google.com/github/huggingface/notebooks/blob/main/examples/protein_language_modeling.ipynb#scrollTo=fc164b49
+
+num_labels = 2
+model = AutoModelForSequenceClassification.from_pretrained(checkpoint, num_labels=num_labels)
+
+model_name = checkpoint.split("/")[-1]
+batch_size = 8
+
+args = TrainingArguments(
+    f"{model_name}-finetuned-localization",
+    evaluation_strategy = "epoch",
+    save_strategy = "epoch",
+    learning_rate=2e-5,
+    per_device_train_batch_size=batch_size,
+    per_device_eval_batch_size=batch_size,
+    num_train_epochs=3,
+    weight_decay=0.01,
+    load_best_model_at_end=True,
+    metric_for_best_model="accuracy",
+    push_to_hub=False,
+)
+
+metric = load("accuracy")
+
+def compute_metrics(eval_pred):
+    predictions, labels = eval_pred
+    predictions = np.argmax(predictions, axis=1)
+    return metric.compute(predictions=predictions, references=labels)
+
+trainer = Trainer(
+    model,
+    args,
+    train_dataset=train_dataset,
+    eval_dataset=test_dataset,
+    tokenizer=tokenizer,
+    compute_metrics=compute_metrics,
+)
 # %%
+trainer.train()
