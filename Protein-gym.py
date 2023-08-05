@@ -20,7 +20,6 @@ from evaluate import load
 from datetime import datetime
 import numpy as np
 import pandas as pd
-from datasets import DatasetDict
 # http requests
 import requests, zipfile, io, os
 
