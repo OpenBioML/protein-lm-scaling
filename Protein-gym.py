@@ -1,3 +1,15 @@
+######################################################################################################
+# Script: ProteinGym Eval script
+# Authors: Maximilian Sprang, Muedi
+# Date: 08/2023
+# Description: This script downloads and handles the zipped Protein Gym Csvs and preprocesses them 
+# to be able to tokenized by EMS/ProtBERT tokenizers.
+# Tokenization is done and then the esm 630M Model is used to be finetuned on ProteinGyms data
+# ATM only substitution data is implemented for the finetunning but both are preprocessed and the
+# complete datasets saved as CSV.
+# finetuning is done with the evaluaten libray, which we'll likely change to an own trainling loop
+# to be more flexible with our own models.  
+######################################################################################################
 # %%
 # huggingface
 from transformers import AutoTokenizer, DataCollatorWithPadding, AutoModelForSequenceClassification, TrainingArguments, Trainer
@@ -13,7 +25,7 @@ from datasets import DatasetDict
 import requests, zipfile, io, os
 
 # %%
-# download substitutions, save to disk
+# download substitutions, unzip, save to disk
 path = "data/ProteinGym/"
 sub_url = "https://marks.hms.harvard.edu/proteingym/ProteinGym_substitutions.zip"
 
@@ -25,7 +37,7 @@ else:
     z = zipfile.ZipFile(io.BytesIO(r.content))
     z.extractall(path)
 
-# download indels, save to disk
+# download indels, unzip, save to disk
 sub_url = "https://marks.hms.harvard.edu/proteingym/ProteinGym_indels.zip"
 
 if os.path.exists(path + "ProteinGym_indels"):
@@ -37,7 +49,8 @@ else:
     z.extractall(path)
 
 # %%
-# load substitution data and tokenize
+# load substitution data, introduce whitespeces and CLS/EOS tokens
+# save complete data as csv, load as HF dataset
 if os.path.exists(path + "ProteinGym_substitutions.csv"):
     print("preprocessing was already done, load csv")
     dataset = load_dataset("csv", data_files=(path + "ProteinGym_substitutions.csv"))
@@ -60,7 +73,7 @@ else:
     dataset = load_dataset("csv", data_files=(path + "ProteinGym_substitutions.csv"))
     del merged_data
 
-# %% tokenize
+# %% tokenize, with esm2_t33_650M_UR50D, use same checkpoint for model
 checkpoint = "facebook/esm2_t33_650M_UR50D"
 tokenizer = AutoTokenizer.from_pretrained(checkpoint)
 def tokenize(batch):
@@ -79,13 +92,18 @@ token_data = token_data.rename_column("DMS_score_bin", "labels")
 dict_train_test = token_data['train'].train_test_split(test_size=0.4, shuffle=True)
 train_dataset = dict_train_test['train']
 test_dataset = dict_train_test['test']
-# # here we could split into validation and test
+
+# subset for testruns:
+# train_dataset = train_dataset.select([x for x in range(200)])
+# test_dataset = test_dataset.select([x for x in range(100)])
+
+# # here we could split into validation and test if needed
 # dict_test_valid = test_dataset.train_test_split(test_size=0.5, shuffle=True)
 # test_dataset = dict_test_valid['test']
 # valid_dataset = dict_test_valid['train']
 # %%  taken from facebooks pretrained-finetuning notebook here: 
 # https://colab.research.google.com/github/huggingface/notebooks/blob/main/examples/protein_language_modeling.ipynb#scrollTo=fc164b49
-
+# load model for seq classification
 num_labels = 2
 model = AutoModelForSequenceClassification.from_pretrained(checkpoint, num_labels=num_labels)
 
