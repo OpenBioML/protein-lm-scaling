@@ -1,2 +1,4 @@
 /data/ProteinGym/
 /esm2*/
+*.lock
+*.pyc
