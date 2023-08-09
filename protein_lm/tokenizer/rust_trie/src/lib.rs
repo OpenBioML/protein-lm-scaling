@@ -21,6 +21,26 @@ pub struct Trie {
     next_id: usize, // for assigning unique IDs to tokens
 }
 
+// A Trie: See https://en.wikipedia.org/wiki/Trie
+// This is a data structure that allows for tokenizing a stream of text
+// such that the longest possible tokens are recognized first.
+//
+// To explain how this works, let's first consider how we add new tokens.
+// Let's say we have four possible tokens: 'A', 'B', 'AA', 'AB'
+// The trie always has an empty root node. There will be two children:
+// the node 'A' with token_id 0 and 'B' with token_id 1. The node 'B' has
+// no children since we have no tokens that start with 'B' and continue to
+// another character.
+// The node 'A' has two children, one other node with 'A' with token_id of 2
+// and a node 'B' with token_id of 3.
+// Now, to tokenize the following string: 'ABAABA'
+// We start from the beginning of the string, continuing until we no longer have
+// the substring in our tokens. The first character is 'A'; going down the trie
+// we have a node that starts with 'A'. The next character is 'B', and our 'A' node
+// has a child that starts with 'B'. The character after is 'A', but our last node,
+// with token_id = 3, has no children, so we have our first token 'AB' with token_id 3.
+// Similarly, we have 'AA' token_id 2, 'B' with token_id 1, and 'A' with token_id 0.
+// So, 'ABAABA' -> [3, 2, 1, 0]
 #[pymethods]
 impl Trie {
     #[new]
@@ -31,6 +51,10 @@ impl Trie {
         }
     }
 
+    // Function responsible for figuring out the tree structure
+    // Children are represented as dictionaries to make the search simpler.
+    // In fact, for our purposes where the number of children will be small,
+    // it is probably faster to use lists.
     pub fn add(&mut self, word: &str) {
         let mut node = &mut self.root;
         for ch in word.chars() {
@@ -42,6 +66,9 @@ impl Trie {
         }
     }
 
+    // Tokenizing function. Does what is described in the comment above.
+    // You can see how we keep going through the characters until we hit a node
+    // that has no children.
     pub fn tokenize(&self, text: &str) -> Vec<usize> {
         let mut tokens = vec![];
         let mut start = 0;
@@ -52,13 +79,14 @@ impl Trie {
             let mut end = start;
             for ch in text[start..].chars() {
                 if let Some(next_node) = node.children.get(&ch) {
+                    // If the character matches a child, we go to the next node
                     node = next_node;
                     end += ch.len_utf8();
-                    if node.token_id.is_some() {
+                    if node.token_id.is_some() {  // If at the leaf, we have our token
                         matched = true;
                         break;
                     }
-                } else {
+                } else {  // This means we never matched, so it is an '<unk>' token
                     break;
                 }
             }
@@ -123,9 +151,9 @@ mod tests {
             .eval("trie.Trie()", Some(locals), None)
             .unwrap()
             .into();
-        py_trie.call_method0("add", "[CLS]").unwrap();
+        py_trie.call_method0("add", "<cls>").unwrap();
         let tokens: Vec<usize> = py_trie
-            .call_method1("tokenize", ("[CLS] This is a test",))
+            .call_method1("tokenized", ("<cls> This is a test",))
             .unwrap()
             .extract()
             .unwrap();
