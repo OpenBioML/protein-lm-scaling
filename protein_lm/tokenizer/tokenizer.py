@@ -10,8 +10,7 @@ class Tokenizer:
         self.trie = Trie(unk_token_id)
         for token in tokens:
             self.trie.add(token)
-        # The Trie will return len(self.ids_to_tokens) when it can't find the token
-        # For decoding, we need to add the <unk> token back in, even if it already exists
+        # If unk_token_id is not provided, add <unk> to the end of the tokens list
         if unk_token_id is None:
             self.ids_to_tokens += ["<unk>"]
         self.pad_token_id = self.ids_to_tokens.index("<pad>")
