@@ -5,14 +5,15 @@ from rust_trie import Trie
 
 
 class Tokenizer:
-    def __init__(self, tokens: List[str]):
+    def __init__(self, tokens: List[str], unk_token_id: int = None):
         self.ids_to_tokens = tokens
-        self.trie = Trie()
+        self.trie = Trie(unk_token_id)
         for token in tokens:
             self.trie.add(token)
         # The Trie will return len(self.ids_to_tokens) when it can't find the token
         # For decoding, we need to add the <unk> token back in, even if it already exists
-        self.ids_to_tokens += ["<unk>"]
+        if unk_token_id is None:
+            self.ids_to_tokens += ["<unk>"]
         self.pad_token_id = self.ids_to_tokens.index("<pad>")
         self.mask_token_id = self.ids_to_tokens.index("<mask>")
 
@@ -60,7 +61,7 @@ class EsmTokenizer(Tokenizer):
             "N", "F", "Y", "M", "H", "W", "C", "X", "B", "U", 
             "Z", "O", ".", "-", "<null_1>", "<mask>"
         ]
-        super().__init__(self.ids_to_tokens)
+        super().__init__(self.ids_to_tokens, unk_token_id=3)
 
 
 

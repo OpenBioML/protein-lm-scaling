@@ -19,6 +19,8 @@ impl TrieNode {
 pub struct Trie {
     root: TrieNode,
     next_id: usize, // for assigning unique IDs to tokens
+    unk_token_set: bool,
+    unk_token_id: usize,
 }
 
 // A Trie: See https://en.wikipedia.org/wiki/Trie
@@ -44,10 +46,12 @@ pub struct Trie {
 #[pymethods]
 impl Trie {
     #[new]
-    pub fn new() -> Self {
+    pub fn new(unk_token_id: Option<usize>) -> Self {
         Trie {
             root: TrieNode::new(),
             next_id: 0, // We start the IDs at 0
+            unk_token_set: unk_token_id.is_some(),
+            unk_token_id: unk_token_id.unwrap_or(0),
         }
     }
 
@@ -63,6 +67,9 @@ impl Trie {
         if node.token_id.is_none() {
             node.token_id = Some(self.next_id);
             self.next_id += 1;
+            if !self.unk_token_set {
+                self.unk_token_id = self.next_id;
+            }
         }
     }
 
@@ -95,7 +102,7 @@ impl Trie {
                 tokens.push(node.token_id.unwrap());
                 start = end;
             } else {
-                tokens.push(self.next_id); // Assign unknown token ID
+                tokens.push(self.unk_token_id); // Assign unknown token ID
                 start += text[start..].chars().next().unwrap().len_utf8();
             }
         }
