@@ -66,7 +66,7 @@ else:
     # Add spaces between each amino acid in the 'mutated_sequences' column
     merged_data['mutated_sequence'] = merged_data['mutated_sequence'].apply(lambda seq: ' '.join(list(seq)))
     # add cls and end tokens
-    merged_data['mutated_sequence'] = "[CLS] " + merged_data['mutated_sequence'] + " [EOS]"
+    merged_data['mutated_sequence'] = "<cls> " + merged_data['mutated_sequence'] + " <eos>"
     # save csv
     merged_data.to_csv(path + "ProteinGym_substitutions.csv", index=False)
     dataset = load_dataset("csv", data_files=(path + "ProteinGym_substitutions.csv"))
@@ -102,41 +102,48 @@ test_dataset = dict_train_test['test']
 # valid_dataset = dict_test_valid['train']
 # %%  taken from facebooks pretrained-finetuning notebook here: 
 # https://colab.research.google.com/github/huggingface/notebooks/blob/main/examples/protein_language_modeling.ipynb#scrollTo=fc164b49
-# load model for seq classification
-num_labels = 2
-model = AutoModelForSequenceClassification.from_pretrained(checkpoint, num_labels=num_labels)
+supervised=True
+if supervised:
+    # load model for seq classification
+    num_labels = 2
+    model = AutoModelForSequenceClassification.from_pretrained(checkpoint, num_labels=num_labels)
 
-model_name = checkpoint.split("/")[-1]
-batch_size = 8
+    model_name = checkpoint.split("/")[-1]
+    batch_size = 8
 
-args = TrainingArguments(
-    f"{model_name}-finetuned-localization",
-    evaluation_strategy = "epoch",
-    save_strategy = "epoch",
-    learning_rate=2e-5,
-    per_device_train_batch_size=batch_size,
-    per_device_eval_batch_size=batch_size,
-    num_train_epochs=3,
-    weight_decay=0.01,
-    load_best_model_at_end=True,
-    metric_for_best_model="accuracy",
-    push_to_hub=False,
-)
+    args = TrainingArguments(
+        f"{model_name}-finetuned-localization",
+        evaluation_strategy = "epoch",
+        save_strategy = "epoch",
+        learning_rate=2e-5,
+        per_device_train_batch_size=batch_size,
+        per_device_eval_batch_size=batch_size,
+        num_train_epochs=3,
+        weight_decay=0.01,
+        load_best_model_at_end=True,
+        metric_for_best_model="accuracy",
+        push_to_hub=False,
+    )
 
-metric = load("accuracy")
+    metric = load("accuracy")
 
-def compute_metrics(eval_pred):
-    predictions, labels = eval_pred
-    predictions = np.argmax(predictions, axis=1)
-    return metric.compute(predictions=predictions, references=labels)
+    def compute_metrics(eval_pred):
+        predictions, labels = eval_pred
+        predictions = np.argmax(predictions, axis=1)
+        return metric.compute(predictions=predictions, references=labels)
 
-trainer = Trainer(
-    model,
-    args,
-    train_dataset=train_dataset,
-    eval_dataset=test_dataset,
-    tokenizer=tokenizer,
-    compute_metrics=compute_metrics,
-)
-# %%
-trainer.train()
+    trainer = Trainer(
+        model,
+        args,
+        train_dataset=train_dataset,
+        eval_dataset=test_dataset,
+        tokenizer=tokenizer,
+        compute_metrics=compute_metrics,
+    )
+    # run trainer, this will return eval loass andd accuracy every few steps
+    # and save this to the disk in the esm2* folder
+    trainer.train()
+else:
+    # here we'll add a zero-shot eval script like this: 
+    # https://github.com/facebookresearch/esm/blob/main/examples/variant-prediction/predict.py
+    pass
