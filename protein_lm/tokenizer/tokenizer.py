@@ -16,6 +16,9 @@ class Tokenizer:
         self.pad_token_id = self.ids_to_tokens.index("<pad>")
         self.mask_token_id = self.ids_to_tokens.index("<mask>")
 
+    def __call__(self, *args, **kwargs):
+        return self.encode(*args, **kwargs)
+    
     def encode(
         self, 
         sequence: str, 
@@ -54,22 +57,22 @@ class Tokenizer:
 
 class EsmTokenizer(Tokenizer):
     def __init__(self):
-        self.ids_to_tokens = [
+        tokens = [
             "<cls>", "<pad>", "<eos>", "<unk>", "L", "A", "G", 
             "V", "S", "E", "R", "T", "I", "D", "P", "K", "Q", 
             "N", "F", "Y", "M", "H", "W", "C", "X", "B", "U", 
             "Z", "O", ".", "-", "<null_1>", "<mask>"
         ]
-        super().__init__(self.ids_to_tokens, unk_token_id=3)
+        super().__init__(tokens, unk_token_id=3)
 
 
 
 class AptTokenizer(Tokenizer):
-    def __init__(self, tokens: List[str]):
+    def __init__(self):
         # For our own tokenizers, we don't need to explicitly add the <unk> token
         # because it gets added as the last token in the tokens list
         # I've also removed X so that it gets translated to <unk>
-        self.ids_to_tokens = [
+        tokens = [
             "<cls>", "<pad>", "<eos>", "L", "A", "G", "V", 
             "S", "E", "R", "T", "I", "D", "P", "K", "Q", "N", 
             "F", "Y", "M", "H", "W", "C", "B", "U", "Z", "O", 
