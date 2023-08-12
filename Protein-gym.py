@@ -15,6 +15,9 @@
 from transformers import AutoTokenizer, DataCollatorWithPadding, AutoModelForSequenceClassification, TrainingArguments, Trainer
 from datasets import load_dataset
 from evaluate import load
+
+from protein_lm.tokenizer.tokenizer import EsmTokenizer, AptTokenizer
+
 # others
 # import matplotlib.pyplot as plt
 from datetime import datetime
@@ -64,9 +67,9 @@ else:
             all_data.append(df)
     merged_data = pd.concat(all_data, ignore_index=True)
     # Add spaces between each amino acid in the 'mutated_sequences' column
-    merged_data['mutated_sequence'] = merged_data['mutated_sequence'].apply(lambda seq: ' '.join(list(seq)))
+    # merged_data['mutated_sequence'] = merged_data['mutated_sequence'].apply(lambda seq: ' '.join(list(seq)))
     # add cls and end tokens
-    merged_data['mutated_sequence'] = "<cls> " + merged_data['mutated_sequence'] + " <eos>"
+    merged_data['mutated_sequence'] = "<cls>" + merged_data['mutated_sequence'] + "<eos>"
     # save csv
     merged_data.to_csv(path + "ProteinGym_substitutions.csv", index=False)
     dataset = load_dataset("csv", data_files=(path + "ProteinGym_substitutions.csv"))
@@ -74,9 +77,18 @@ else:
 
 # %% tokenize, with esm2_t33_650M_UR50D, use same checkpoint for model
 checkpoint = "facebook/esm2_t33_650M_UR50D"
-tokenizer = AutoTokenizer.from_pretrained(checkpoint)
+# autoTokenizer = AutoTokenizer.from_pretrained(checkpoint)
+tokens = [
+            "<cls>", "<pad>", "<eos>", "L", "A", "G", "V", 
+            "S", "E", "R", "T", "I", "D", "P", "K", "Q", "N", 
+            "F", "Y", "M", "H", "W", "C", "B", "U", "Z", "O", 
+            "<mask>"
+        ]
+tokenizer = AptTokenizer(tokens)
+
 def tokenize(batch):
-    return tokenizer(batch["mutated_sequence"], truncation=True, padding='max_length', max_length=760)
+    tokens = tokenizer(batch["mutated_sequence"], return_tensors=True, max_length=760)
+    return {"input_ids": tokens}
 
 token_data = dataset.map(tokenize, batched=True)
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
@@ -137,7 +149,7 @@ if supervised:
         args,
         train_dataset=train_dataset,
         eval_dataset=test_dataset,
-        tokenizer=tokenizer,
+        # tokenizer=tokenizer,
         compute_metrics=compute_metrics,
     )
     # run trainer, this will return eval loass andd accuracy every few steps

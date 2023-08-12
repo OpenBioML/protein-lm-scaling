@@ -16,6 +16,13 @@ class Tokenizer:
         self.pad_token_id = self.ids_to_tokens.index("<pad>")
         self.mask_token_id = self.ids_to_tokens.index("<mask>")
 
+    def __call__(self, sequences: List[str], add_special_tokens: bool = False, return_tensors: bool = False, max_length: int = None):
+        tokens = self.batch_encode(sequences=sequences,
+                                    add_special_tokens=add_special_tokens,
+                                    return_tensors=return_tensors,
+                                    max_sequence_length=max_length)
+        return tokens    
+
     def encode(
         self, 
         sequence: str, 
@@ -50,6 +57,7 @@ class Tokenizer:
 
     def decode(self, tokens: List[int]) -> str:
         return "".join([self.ids_to_tokens[idx] for idx in tokens])
+    
 
 
 class EsmTokenizer(Tokenizer):
