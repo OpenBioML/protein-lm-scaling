@@ -101,6 +101,7 @@ else:
     merged_data = pd.concat(all_data, ignore_index=True)
     base_seqs = pd.DataFrame(base_seqs, index=["base_seq"]).T
     base_seqs = base_seqs.reset_index(names="experiment")
+
     # save the baseseqs
     base_seqs.to_csv(path + "ProteinGym_substitutions_base_seqs.csv", index=False)
     # Add spaces between each amino acid in the 'mutated_sequences' column
