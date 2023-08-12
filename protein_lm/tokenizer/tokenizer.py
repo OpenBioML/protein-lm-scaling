@@ -16,6 +16,7 @@ class Tokenizer:
         self.pad_token_id = self.ids_to_tokens.index("<pad>")
         self.mask_token_id = self.ids_to_tokens.index("<mask>")
 
+
     def __call__(self, sequences: Union[str, List], *args, **kwargs):
         if isinstance(sequences, str):
             return self.encode(sequences, *args, **kwargs)
@@ -67,6 +68,7 @@ class Tokenizer:
 
     def decode(self, tokens: List[int]) -> str:
         return "".join([self.ids_to_tokens[idx] for idx in tokens])
+    
 
 
 class EsmTokenizer(Tokenizer):

@@ -15,6 +15,9 @@
 from transformers import AutoTokenizer, DataCollatorWithPadding, AutoModelForSequenceClassification, TrainingArguments, Trainer
 from datasets import load_dataset
 from evaluate import load
+
+from protein_lm.tokenizer import EsmTokenizer, AptTokenizer
+
 # others
 # import matplotlib.pyplot as plt
 from datetime import datetime
@@ -22,6 +25,30 @@ import numpy as np
 import pandas as pd
 # http requests
 import requests, zipfile, io, os
+
+# %%
+############################################## Functions ################################################ 
+
+def get_base_sequence(df: pd.DataFrame):
+    # this function takes the first row of a given DMS dataframe and corrects the given mutant
+    # in the given sequence to get the base sequence
+    
+    mutations = df.loc[0, "mutant"].split(':')
+    seq = df.loc[0, "mutated_sequence"]
+    for mutation in mutations:
+        base_AA = mutation[0]
+        # mut_AA = mutation[-1]
+        position = int(mutation[1:-1])
+        # index seq at given position - 1 as the AA index doesn't start at 0
+        base_seq = seq[:position - 1] + base_AA + seq[position:] 
+        seq = base_seq
+    return base_seq
+
+def label_seq(seq, base_seq, ):
+    # this function computes the score for a given sequence and base sequence
+    # the way to go is to mask the token, that we know is mutated and let the model fill in the mask.
+    # then compute the score by substracting the topken probabilities of the WT with the MT probs
+    pass
 
 # %%
 # download substitutions, unzip, save to disk
@@ -50,23 +77,36 @@ else:
 # %%
 # load substitution data, introduce whitespeces and CLS/EOS tokens
 # save complete data as csv, load as HF dataset
-if os.path.exists(path + "ProteinGym_substitutions.csv"):
+if os.path.exists(path + "ProteinGym_substitutions.csv") and os.path.exists(path + "ProteinGym_substitutions_base_seqs.csv"):
     print("preprocessing was already done, load csv")
     dataset = load_dataset("csv", data_files=(path + "ProteinGym_substitutions.csv"))
+    base_seqs = pd.read_csv(path + "ProteinGym_substitutions_base_seqs.csv")
 else:
     print("preprocess substitutions ...")
     folder_path = "data/ProteinGym/ProteinGym_substitutions"
     all_data = []
+    base_seqs = {} # init dict to save baseseqs
     for filename in os.listdir(folder_path):
         if filename.endswith('.csv'):
             file_path = os.path.join(folder_path, filename)
             df = pd.read_csv(file_path)
+            experiment = filename[:-4]
+            # save base_seqs, as experiment:sequence pair, needs to be before changing mutant name :)
+            base_seqs[experiment] = get_base_sequence(df)
+            # add experiment name to track and get base sequence for zero-shot tasks
+            df["mutant"] = experiment + "_" + df["mutant"]
             all_data.append(df)
+            
+    # get dataframe
     merged_data = pd.concat(all_data, ignore_index=True)
+    base_seqs = pd.DataFrame(base_seqs, index=["base_seq"]).T
+    base_seqs = base_seqs.reset_index(names="experiment")
+    # save the baseseqs
+    base_seqs.to_csv(path + "ProteinGym_substitutions_base_seqs.csv", index=False)
     # Add spaces between each amino acid in the 'mutated_sequences' column
-    merged_data['mutated_sequence'] = merged_data['mutated_sequence'].apply(lambda seq: ' '.join(list(seq)))
+    # merged_data['mutated_sequence'] = merged_data['mutated_sequence'].apply(lambda seq: ' '.join(list(seq)))
     # add cls and end tokens
-    merged_data['mutated_sequence'] = "<cls> " + merged_data['mutated_sequence'] + " <eos>"
+    merged_data['mutated_sequence'] = "<cls>" + merged_data['mutated_sequence'] + "<eos>"
     # save csv
     merged_data.to_csv(path + "ProteinGym_substitutions.csv", index=False)
     dataset = load_dataset("csv", data_files=(path + "ProteinGym_substitutions.csv"))
@@ -74,9 +114,12 @@ else:
 
 # %% tokenize, with esm2_t33_650M_UR50D, use same checkpoint for model
 checkpoint = "facebook/esm2_t33_650M_UR50D"
-tokenizer = AutoTokenizer.from_pretrained(checkpoint)
+# autoTokenizer = AutoTokenizer.from_pretrained(checkpoint)
+tokenizer = AptTokenizer()
+
 def tokenize(batch):
-    return tokenizer(batch["mutated_sequence"], truncation=True, padding='max_length', max_length=760)
+    tokens = tokenizer(batch["mutated_sequence"], return_tensors=True, max_length=760)
+    return {"input_ids": tokens}
 
 token_data = dataset.map(tokenize, batched=True)
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
@@ -102,7 +145,7 @@ test_dataset = dict_train_test['test']
 # valid_dataset = dict_test_valid['train']
 # %%  taken from facebooks pretrained-finetuning notebook here: 
 # https://colab.research.google.com/github/huggingface/notebooks/blob/main/examples/protein_language_modeling.ipynb#scrollTo=fc164b49
-supervised=True
+supervised=False
 if supervised:
     # load model for seq classification
     num_labels = 2
@@ -137,7 +180,7 @@ if supervised:
         args,
         train_dataset=train_dataset,
         eval_dataset=test_dataset,
-        tokenizer=tokenizer,
+        # tokenizer=tokenizer,
         compute_metrics=compute_metrics,
     )
     # run trainer, this will return eval loass andd accuracy every few steps
