@@ -27,6 +27,22 @@ import pandas as pd
 import requests, zipfile, io, os
 
 # %%
+############################################## Functions ################################################ 
+
+# this function takes the first row of a given DMS dataframe and corrects the given mutant
+# in the given sequence to get the base sequence
+def get_base_sequence(df: pd.DataFrame):
+    mutation = df.loc[0, "mutant"]
+    seq = df.loc[0, "mutated_sequence"]
+    base_AA = mutation[0]
+    # mut_AA = mutation[-1]
+    position = int(mutation[1:-1])
+    base_seq = seq[:position] + base_AA + seq[position + 1:]
+    return base_seq
+
+
+
+# %%
 # download substitutions, unzip, save to disk
 path = "data/ProteinGym/"
 sub_url = "https://marks.hms.harvard.edu/proteingym/ProteinGym_substitutions.zip"
@@ -53,19 +69,30 @@ else:
 # %%
 # load substitution data, introduce whitespeces and CLS/EOS tokens
 # save complete data as csv, load as HF dataset
-if os.path.exists(path + "ProteinGym_substitutions.csv"):
+if os.path.exists(path + "ProteinGym_substitutions.csv") and os.path.exists(path + "ProteinGym_substitutions_base_seqs.csv"):
     print("preprocessing was already done, load csv")
     dataset = load_dataset("csv", data_files=(path + "ProteinGym_substitutions.csv"))
+    base_seqs = pd.read_csv(path + "ProteinGym_substitutions_base_seqs.csv")
 else:
     print("preprocess substitutions ...")
     folder_path = "data/ProteinGym/ProteinGym_substitutions"
     all_data = []
+    base_seqs = {} # init dict to save baseseqs
     for filename in os.listdir(folder_path):
         if filename.endswith('.csv'):
             file_path = os.path.join(folder_path, filename)
             df = pd.read_csv(file_path)
+            experiment = filename[:-4]
+            # save base_seqs, as experiment:sequence pair, needs to be before changing mutant name :)
+            base_seqs[experiment] = get_base_sequence(df)
+            # add experiment name to track and get base sequence for zero-shot tasks
+            df["mutant"] = experiment + "_" + df["mutant"]
             all_data.append(df)
+    # get dataframe
     merged_data = pd.concat(all_data, ignore_index=True)
+    base_seqs = pd.DataFrame.from_dict(all_data)
+    # save the baseseqs
+    base_seqs.to_csv(path + "ProteinGym_substitutions_base_seqs.csv", index=False)
     # Add spaces between each amino acid in the 'mutated_sequences' column
     # merged_data['mutated_sequence'] = merged_data['mutated_sequence'].apply(lambda seq: ' '.join(list(seq)))
     # add cls and end tokens
@@ -114,7 +141,7 @@ test_dataset = dict_train_test['test']
 # valid_dataset = dict_test_valid['train']
 # %%  taken from facebooks pretrained-finetuning notebook here: 
 # https://colab.research.google.com/github/huggingface/notebooks/blob/main/examples/protein_language_modeling.ipynb#scrollTo=fc164b49
-supervised=True
+supervised=False
 if supervised:
     # load model for seq classification
     num_labels = 2
