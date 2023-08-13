@@ -31,13 +31,17 @@ import requests, zipfile, io, os
 
 # this function takes the first row of a given DMS dataframe and corrects the given mutant
 # in the given sequence to get the base sequence
+
 def get_base_sequence(df: pd.DataFrame):
-    mutation = df.loc[0, "mutant"]
+    mutations = df.loc[0, "mutant"].split(':')
     seq = df.loc[0, "mutated_sequence"]
-    base_AA = mutation[0]
-    # mut_AA = mutation[-1]
-    position = int(mutation[1:-1])
-    base_seq = seq[:position] + base_AA + seq[position + 1:]
+    for mutation in mutations:
+        base_AA = mutation[0]
+        # mut_AA = mutation[-1]
+        position = int(mutation[1:-1])
+        # index seq at given position - 1 as the AA index doesn't start at 0
+        base_seq = seq[:position - 1] + base_AA + seq[position:] 
+        seq = base_seq
     return base_seq
 
 
@@ -88,9 +92,11 @@ else:
             # add experiment name to track and get base sequence for zero-shot tasks
             df["mutant"] = experiment + "_" + df["mutant"]
             all_data.append(df)
+            
     # get dataframe
     merged_data = pd.concat(all_data, ignore_index=True)
-    base_seqs = pd.DataFrame.from_dict(all_data)
+    base_seqs = pd.DataFrame(base_seqs, index=["base_seq"]).T
+    base_seqs = base_seqs.reset_index(names="experiment")
     # save the baseseqs
     base_seqs.to_csv(path + "ProteinGym_substitutions_base_seqs.csv", index=False)
     # Add spaces between each amino acid in the 'mutated_sequences' column
