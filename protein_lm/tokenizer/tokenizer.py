@@ -1,5 +1,5 @@
 import torch
-from typing import List
+from typing import List, Union
 
 from rust_trie import Trie 
 
@@ -16,15 +16,21 @@ class Tokenizer:
         self.pad_token_id = self.ids_to_tokens.index("<pad>")
         self.mask_token_id = self.ids_to_tokens.index("<mask>")
 
-    def __call__(self, *args, **kwargs):
-        return self.encode(*args, **kwargs)
+    def __call__(self, sequences: Union[str, List], *args, **kwargs):
+        if isinstance(sequences, str):
+            return self.encode(sequences, *args, **kwargs)
+        else:
+            return self.batch_encode(sequences, *args, **kwargs)
     
     def encode(
         self, 
         sequence: str, 
         add_special_tokens: bool = False,
         return_tensor: bool = False,
+        max_sequence_length: int = None,
     ) -> List[int]:
+        if max_sequence_length is not None:
+            sequence = sequence[:max_sequence_length]
         if add_special_tokens:
             sequence = "<cls>" + sequence + "<eos>"
         output = self.trie.tokenize(sequence)
