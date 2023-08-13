@@ -46,6 +46,8 @@ class Tokenizer:
         max_sequence_length: int = None,
     ) -> List[List[int]]:
         output = []
+        if max_sequence_length is None and return_tensors:
+            max_sequence_length = max([len(sequence) for sequence in sequences])
         if max_sequence_length is not None:
             sequences = [sequence[:max_sequence_length] for sequence in sequences]
         for sequence in sequences:
