@@ -29,10 +29,9 @@ import requests, zipfile, io, os
 # %%
 ############################################## Functions ################################################ 
 
+# this function takes the first row of a given DMS dataframe and corrects the given mutant
+# in the given sequence to get the base sequence
 def get_base_sequence(df: pd.DataFrame):
-    # this function takes the first row of a given DMS dataframe and corrects the given mutant
-    # in the given sequence to get the base sequence
-    
     mutations = df.loc[0, "mutant"].split(':')
     seq = df.loc[0, "mutated_sequence"]
     for mutation in mutations:
@@ -101,7 +100,6 @@ else:
     merged_data = pd.concat(all_data, ignore_index=True)
     base_seqs = pd.DataFrame(base_seqs, index=["base_seq"]).T
     base_seqs = base_seqs.reset_index(names="experiment")
-
     # save the baseseqs
     base_seqs.to_csv(path + "ProteinGym_substitutions_base_seqs.csv", index=False)
     # Add spaces between each amino acid in the 'mutated_sequences' column
