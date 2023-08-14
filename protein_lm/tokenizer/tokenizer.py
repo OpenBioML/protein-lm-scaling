@@ -1,5 +1,5 @@
 import torch
-from typing import List
+from typing import List, Union
 
 from rust_trie import Trie 
 
@@ -16,19 +16,21 @@ class Tokenizer:
         self.pad_token_id = self.ids_to_tokens.index("<pad>")
         self.mask_token_id = self.ids_to_tokens.index("<mask>")
 
-    def __call__(self, sequences: List[str], add_special_tokens: bool = False, return_tensors: bool = False, max_length: int = None):
-        tokens = self.batch_encode(sequences=sequences,
-                                    add_special_tokens=add_special_tokens,
-                                    return_tensors=return_tensors,
-                                    max_sequence_length=max_length)
-        return tokens    
-
+    def __call__(self, sequences: Union[str, List], *args, **kwargs):
+        if isinstance(sequences, str):
+            return self.encode(sequences, *args, **kwargs)
+        else:
+            return self.batch_encode(sequences, *args, **kwargs)
+    
     def encode(
         self, 
         sequence: str, 
         add_special_tokens: bool = False,
         return_tensor: bool = False,
+        max_sequence_length: int = None,
     ) -> List[int]:
+        if max_sequence_length is not None:
+            sequence = sequence[:max_sequence_length]
         if add_special_tokens:
             sequence = "<cls>" + sequence + "<eos>"
         output = self.trie.tokenize(sequence)
@@ -44,6 +46,8 @@ class Tokenizer:
         max_sequence_length: int = None,
     ) -> List[List[int]]:
         output = []
+        if max_sequence_length is None and return_tensors:
+            max_sequence_length = max([len(sequence) for sequence in sequences])
         if max_sequence_length is not None:
             sequences = [sequence[:max_sequence_length] for sequence in sequences]
         for sequence in sequences:
@@ -62,22 +66,22 @@ class Tokenizer:
 
 class EsmTokenizer(Tokenizer):
     def __init__(self):
-        self.ids_to_tokens = [
+        tokens = [
             "<cls>", "<pad>", "<eos>", "<unk>", "L", "A", "G", 
             "V", "S", "E", "R", "T", "I", "D", "P", "K", "Q", 
             "N", "F", "Y", "M", "H", "W", "C", "X", "B", "U", 
             "Z", "O", ".", "-", "<null_1>", "<mask>"
         ]
-        super().__init__(self.ids_to_tokens, unk_token_id=3)
+        super().__init__(tokens, unk_token_id=3)
 
 
 
 class AptTokenizer(Tokenizer):
-    def __init__(self, tokens: List[str]):
+    def __init__(self):
         # For our own tokenizers, we don't need to explicitly add the <unk> token
         # because it gets added as the last token in the tokens list
         # I've also removed X so that it gets translated to <unk>
-        self.ids_to_tokens = [
+        tokens = [
             "<cls>", "<pad>", "<eos>", "L", "A", "G", "V", 
             "S", "E", "R", "T", "I", "D", "P", "K", "Q", "N", 
             "F", "Y", "M", "H", "W", "C", "B", "U", "Z", "O", 
