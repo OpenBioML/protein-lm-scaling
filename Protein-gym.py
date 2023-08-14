@@ -16,7 +16,7 @@ from transformers import AutoTokenizer, DataCollatorWithPadding, AutoModelForSeq
 from datasets import load_dataset
 from evaluate import load
 
-from protein_lm.tokenizer.tokenizer import EsmTokenizer, AptTokenizer
+from protein_lm.tokenizer import EsmTokenizer, AptTokenizer
 
 # others
 # import matplotlib.pyplot as plt
@@ -29,10 +29,10 @@ import requests, zipfile, io, os
 # %%
 ############################################## Functions ################################################ 
 
-# this function takes the first row of a given DMS dataframe and corrects the given mutant
-# in the given sequence to get the base sequence
-
 def get_base_sequence(df: pd.DataFrame):
+    # this function takes the first row of a given DMS dataframe and corrects the given mutant
+    # in the given sequence to get the base sequence
+    
     mutations = df.loc[0, "mutant"].split(':')
     seq = df.loc[0, "mutated_sequence"]
     for mutation in mutations:
@@ -44,6 +44,10 @@ def get_base_sequence(df: pd.DataFrame):
         seq = base_seq
     return base_seq
 
+def label_seq(seq, base_seq, ):
+    # this function computes the score for a given sequence and base sequence
+    # the way to go is to mask the token, that we know is mutated and let the model fill in the mask.
+    # then compute the score by substracting the topken probabilities of the WT with the MT probs
 
 
 # %%
@@ -111,13 +115,7 @@ else:
 # %% tokenize, with esm2_t33_650M_UR50D, use same checkpoint for model
 checkpoint = "facebook/esm2_t33_650M_UR50D"
 # autoTokenizer = AutoTokenizer.from_pretrained(checkpoint)
-tokens = [
-            "<cls>", "<pad>", "<eos>", "L", "A", "G", "V", 
-            "S", "E", "R", "T", "I", "D", "P", "K", "Q", "N", 
-            "F", "Y", "M", "H", "W", "C", "B", "U", "Z", "O", 
-            "<mask>"
-        ]
-tokenizer = AptTokenizer(tokens)
+tokenizer = AptTokenizer()
 
 def tokenize(batch):
     tokens = tokenizer(batch["mutated_sequence"], return_tensors=True, max_length=760)
@@ -191,4 +189,3 @@ if supervised:
 else:
     # here we'll add a zero-shot eval script like this: 
     # https://github.com/facebookresearch/esm/blob/main/examples/variant-prediction/predict.py
-    pass
