@@ -57,3 +57,7 @@ train(hf_dataset = 'zpn/uniref50', sequence_column = 'sequence', max_sequence_le
 ```
 
 
+## Getting involved
+Your involvement is welcome! If you are interested, you can 
+- Join the `#protein-lm-scaling` channel on the [OpenBioML discord server](https://discord.com/invite/GgDBFP8ZEt).
+- Check out our [contributing guide](docs/CONTRIBUTING.md) if you are interested in contributing to this repository.
