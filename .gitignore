@@ -2,3 +2,7 @@
 /esm2*/
 *.lock
 *.pyc
+wandb/
+checkpoints/
+__pycache__/
+*.DS_Store
