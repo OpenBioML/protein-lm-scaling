@@ -5,4 +5,5 @@
 wandb/
 checkpoints/
 __pycache__/
+protein_lm.egg-info/
 *.DS_Store
