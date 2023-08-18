@@ -92,11 +92,6 @@ class APTAttention(nn.Module):
         self.pruned_heads = self.pruned_heads.union(heads)
 
     def _attn(self, query, key, value, attention_mask=None, head_mask=None):
-
-        # Apply rotary embedding to query and key
-        if self.rot_emb:
-            query, key = self.rot_emb(query,key)
-
         attn_weights = torch.matmul(query, key.transpose(-1, -2))
 
         if self.scale_attn_weights:
@@ -140,10 +135,6 @@ class APTAttention(nn.Module):
         # Use `torch.baddbmm` (a bit more efficient w/ alpha param for scaling -- from Megatron-LM)
         bsz, num_heads, q_seq_len, dk = query.size()
         _, _, k_seq_len, _ = key.size()
-
-        # Apply rotary embedding to query and key
-        if self.rot_emb:
-            query, key = self.rot_emb(query,key)
 
         # Preallocate attn_weights for `baddbmm`
         attn_weights = torch.empty(bsz * num_heads, q_seq_len, k_seq_len, dtype=torch.float32, device=query.device)
@@ -236,6 +227,10 @@ class APTAttention(nn.Module):
         key = self._split_heads(key, self.num_heads, self.head_dim)
         value = self._split_heads(value, self.num_heads, self.head_dim)
 
+        # Apply rotary embedding to query and key
+        if self.rot_emb:
+            query, key = self.rot_emb(query,key)
+            
         if layer_past is not None:
             past_key, past_value = layer_past
             key = torch.cat((past_key, key), dim=-2)
@@ -245,6 +240,8 @@ class APTAttention(nn.Module):
             present = (key, value)
         else:
             present = None
+            
+
 
         if self.reorder_and_upcast_attn:
             attn_output, attn_weights = self._upcast_and_reordered_attn(query, key, value, attention_mask, head_mask)
