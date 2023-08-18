@@ -240,8 +240,6 @@ class APTAttention(nn.Module):
             present = (key, value)
         else:
             present = None
-            
-
 
         if self.reorder_and_upcast_attn:
             attn_output, attn_weights = self._upcast_and_reordered_attn(query, key, value, attention_mask, head_mask)
