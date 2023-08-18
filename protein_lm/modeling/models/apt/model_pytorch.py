@@ -22,7 +22,7 @@ from transformers.utils import logging
 from transformers.utils.model_parallel_utils import assert_device_map, get_device_map
 from .outputs import APTCausalLMOutputWithCrossAttentions
 from .activations import APT_ACT2FN
-from ...rotary_embedding import RotaryEmbedding
+from ...utils.rotary_embedding import RotaryEmbedding
 
 
 logger = logging.get_logger(__name__)
