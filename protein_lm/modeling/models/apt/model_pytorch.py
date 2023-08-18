@@ -93,7 +93,7 @@ class APTAttention(nn.Module):
 
     def _attn(self, query, key, value, attention_mask=None, head_mask=None):
 
-        # apply rotary embeddings to 
+        # Apply rotary embeddings to query and key
         if self.rot_emb:
             query, key = self.rot_emb(query,key)
 
