@@ -22,6 +22,7 @@ from transformers.utils import logging
 from transformers.utils.model_parallel_utils import assert_device_map, get_device_map
 from .outputs import APTCausalLMOutputWithCrossAttentions
 from .activations import APT_ACT2FN
+from ...rotary_embedding import RotaryEmbedding
 
 
 logger = logging.get_logger(__name__)
@@ -73,7 +74,7 @@ class APTAttention(nn.Module):
 
         self.rot_emb=None
         if config.position_embedding == "rotary":
-            self.rot_emb=RotaryEmbeddin(dim=self.head_dim)
+            self.rot_emb=RotaryEmbedding(dim=self.head_dim)
 
     def prune_heads(self, heads):
         if len(heads) == 0:
