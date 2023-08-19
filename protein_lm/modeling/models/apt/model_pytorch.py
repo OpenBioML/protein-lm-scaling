@@ -8,8 +8,7 @@ from transformers.modeling_outputs import (BaseModelOutputWithPastAndCrossAttent
 from transformers.pytorch_utils import Conv1D
 from transformers.activations import ACT2FN
 from transformers.utils import logging
-from .outputs import APTCausalLMOutputWithCrossAttentions
-from ...utils.rotary_embedding import RotaryEmbedding
+from protein_lm.modeling.utils.rotary_embedding import RotaryEmbedding
 
 logger = logging.get_logger(__name__)
 
@@ -60,132 +59,6 @@ class APTAttention(GPT2Attention):
         self.rot_emb=None
         if config.position_embedding == "rotary":
             self.rot_emb=RotaryEmbedding(dim=self.head_dim)
-<<<<<<< HEAD
-=======
-
-    def prune_heads(self, heads):
-        if len(heads) == 0:
-            return
-        heads, index = find_pruneable_heads_and_indices(heads, self.num_heads, self.head_dim, self.pruned_heads)
-        index_attn = torch.cat([index, index + self.split_size, index + (2 * self.split_size)])
-
-        # Prune conv1d layers
-        self.c_attn = prune_conv1d_layer(self.c_attn, index_attn, dim=1)
-        self.c_proj = prune_conv1d_layer(self.c_proj, index, dim=0)
-
-        # Update hyper params
-        self.split_size = (self.split_size // self.num_heads) * (self.num_heads - len(heads))
-        self.num_heads = self.num_heads - len(heads)
-        self.pruned_heads = self.pruned_heads.union(heads)
-
-    def _attn(self, query, key, value, attention_mask=None, head_mask=None):
-        attn_weights = torch.matmul(query, key.transpose(-1, -2))
-
-        if self.scale_attn_weights:
-            attn_weights = attn_weights / torch.full(
-                [], value.size(-1) ** 0.5, dtype=attn_weights.dtype, device=attn_weights.device
-            )
-
-        # Layer-wise attention scaling
-        if self.scale_attn_by_inverse_layer_idx:
-            attn_weights = attn_weights / float(self.layer_idx + 1)
-
-        if not self.is_cross_attention:
-            # if only "normal" attention layer implements causal mask
-            query_length, key_length = query.size(-2), key.size(-2)
-            causal_mask = self.bias[:, :, key_length - query_length : key_length, :key_length]
-            mask_value = torch.finfo(attn_weights.dtype).min
-            # Need to be a tensor, otherwise we get error: `RuntimeError: expected scalar type float but found double`.
-            # Need to be on the same device, otherwise `RuntimeError: ..., x and y to be on the same device`
-            mask_value = torch.full([], mask_value, dtype=attn_weights.dtype).to(attn_weights.device)
-            attn_weights = torch.where(causal_mask, attn_weights.to(attn_weights.dtype), mask_value)
-
-        if attention_mask is not None:
-            # Apply the attention mask
-            attn_weights = attn_weights + attention_mask
-
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1)
-
-        # Downcast (if necessary) back to V's dtype (if in mixed-precision) -- No-Op otherwise
-        attn_weights = attn_weights.type(value.dtype)
-        attn_weights = self.attn_dropout(attn_weights)
-
-        # Mask heads if we want to
-        if head_mask is not None:
-            attn_weights = attn_weights * head_mask
-
-        attn_output = torch.matmul(attn_weights, value)
-
-        return attn_output, attn_weights
-
-    def _upcast_and_reordered_attn(self, query, key, value, attention_mask=None, head_mask=None):
-        # Use `torch.baddbmm` (a bit more efficient w/ alpha param for scaling -- from Megatron-LM)
-        bsz, num_heads, q_seq_len, dk = query.size()
-        _, _, k_seq_len, _ = key.size()
-
-        # Preallocate attn_weights for `baddbmm`
-        attn_weights = torch.empty(bsz * num_heads, q_seq_len, k_seq_len, dtype=torch.float32, device=query.device)
-
-        # Compute Scale Factor
-        scale_factor = 1.0
-        if self.scale_attn_weights:
-            scale_factor /= float(value.size(-1)) ** 0.5
-
-        if self.scale_attn_by_inverse_layer_idx:
-            scale_factor /= float(self.layer_idx + 1)
-
-        # Upcast (turn off autocast) and reorder (Scale K by 1 / root(dk))
-        with autocast(enabled=False):
-            q, k = query.reshape(-1, q_seq_len, dk), key.transpose(-1, -2).reshape(-1, dk, k_seq_len)
-            attn_weights = torch.baddbmm(attn_weights, q.float(), k.float(), beta=0, alpha=scale_factor)
-            attn_weights = attn_weights.reshape(bsz, num_heads, q_seq_len, k_seq_len)
-
-        if not self.is_cross_attention:
-            # if only "normal" attention layer implements causal mask
-            query_length, key_length = query.size(-2), key.size(-2)
-            causal_mask = self.bias[:, :, key_length - query_length : key_length, :key_length]
-            mask_value = torch.finfo(attn_weights.dtype).min
-            # Need to be a tensor, otherwise we get error: `RuntimeError: expected scalar type float but found double`.
-            # Need to be on the same device, otherwise `RuntimeError: ..., x and y to be on the same device`
-            mask_value = torch.tensor(mask_value, dtype=attn_weights.dtype).to(attn_weights.device)
-            attn_weights = torch.where(causal_mask, attn_weights, mask_value)
-
-        if attention_mask is not None:
-            # Apply the attention mask
-            attn_weights = attn_weights + attention_mask
-
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1)
-
-        # Downcast (if necessary) back to V's dtype (if in mixed-precision) -- No-Op if otherwise
-        if attn_weights.dtype != torch.float32:
-            raise RuntimeError("Error with upcasting, attn_weights does not have dtype torch.float32")
-        attn_weights = attn_weights.type(value.dtype)
-        attn_weights = self.attn_dropout(attn_weights)
-
-        # Mask heads if we want to
-        if head_mask is not None:
-            attn_weights = attn_weights * head_mask
-
-        attn_output = torch.matmul(attn_weights, value)
-
-        return attn_output, attn_weights
-
-    def _split_heads(self, tensor, num_heads, attn_head_size):
-        """
-        Splits hidden_size dim into attn_head_size and num_heads
-        """
-        new_shape = tensor.size()[:-1] + (num_heads, attn_head_size)
-        tensor = tensor.view(new_shape)
-        return tensor.permute(0, 2, 1, 3)  # (batch, head, seq_length, head_features)
-
-    def _merge_heads(self, tensor, num_heads, attn_head_size):
-        """
-        Merges attn_head_size dim and num_attn_heads dim into hidden_size
-        """
-        tensor = tensor.permute(0, 2, 1, 3).contiguous()
-        new_shape = tensor.size()[:-2] + (num_heads * attn_head_size,)
-        return tensor.view(new_shape)
->>>>>>> 83d346dc65ea990ba1875710751403f0d7b7a722
 
     
     def forward(
