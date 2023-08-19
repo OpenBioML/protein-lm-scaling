@@ -7,10 +7,8 @@ from transformers import GPT2PreTrainedModel
 from transformers.modeling_outputs import (BaseModelOutputWithPastAndCrossAttentions,CausalLMOutputWithCrossAttentions)
 from transformers.pytorch_utils import Conv1D
 from transformers.activations import ACT2FN
-from protein_lm.modeling.utils.rotary_embedding import RotaryEmbedding
 from transformers.utils import logging
 from .outputs import APTCausalLMOutputWithCrossAttentions
-from .activations import APT_ACT2FN
 from ...utils.rotary_embedding import RotaryEmbedding
 
 logger = logging.get_logger(__name__)
