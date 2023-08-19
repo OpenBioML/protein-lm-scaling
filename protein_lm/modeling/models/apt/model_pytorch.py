@@ -22,6 +22,7 @@ from transformers.utils import logging
 from transformers.utils.model_parallel_utils import assert_device_map, get_device_map
 from .outputs import APTCausalLMOutputWithCrossAttentions
 from .activations import APT_ACT2FN
+from ...utils.rotary_embedding import RotaryEmbedding
 
 
 logger = logging.get_logger(__name__)
@@ -70,6 +71,10 @@ class APTAttention(nn.Module):
         self.resid_dropout = nn.Dropout(config.resid_pdrop)
 
         self.pruned_heads = set()
+
+        self.rot_emb=None
+        if config.position_embedding == "rotary":
+            self.rot_emb=RotaryEmbedding(dim=self.head_dim)
 
     def prune_heads(self, heads):
         if len(heads) == 0:
@@ -222,6 +227,10 @@ class APTAttention(nn.Module):
         key = self._split_heads(key, self.num_heads, self.head_dim)
         value = self._split_heads(value, self.num_heads, self.head_dim)
 
+        # Apply rotary embedding to query and key
+        if self.rot_emb:
+            query, key = self.rot_emb(query,key)
+            
         if layer_past is not None:
             past_key, past_value = layer_past
             key = torch.cat((past_key, key), dim=-2)
