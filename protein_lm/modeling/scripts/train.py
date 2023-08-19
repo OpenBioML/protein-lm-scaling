@@ -18,8 +18,6 @@ from protein_lm.tokenizer.tokenizer import AptTokenizer
 dir_path = os.path.dirname(os.path.abspath(__file__))
 
   
-
-
 def set_input_ids(result= None ,tokenizer = None, sequence_column_name = 'sequence',max_sequence_length = 1024):
   result['input_ids'] = tokenizer(result[sequence_column_name],max_sequence_length=max_sequence_length,add_special_tokens=True,return_tensors=True)
   return result
@@ -45,6 +43,7 @@ def train(**kwargs):
       parser.add_argument('--epochs', default=1000, type=int, help='Batch size for training')
       parser.add_argument('--lr', default=2e-5, type=int, help='learning_rate for training')
       parser.add_argument('--wd', default=0.01, type=int, help='weight_decay for training')
+      parser.add_argument('--encoding_type', default='rotary', type=str, help='type of encoding for model training')
       parser.add_argument('--steps_per_epoch', default=5, type=int, help='step per each training epoch')
       parser.add_argument('--model_checkpoint_path', default='', type=str, help='Path of APT model checkpoint')
       parser.add_argument('--checkpoint_steps', default=500, type=int, help='steps per checkpoint save')
@@ -61,6 +60,7 @@ def train(**kwargs):
       steps = args.steps_per_epoch
       lr = args.lr
       wd = args.wd
+      encoding_type = args.encoding_type
       checkpoint_steps = args.checkpoint_steps
       checkpoint_path = args.model_checkpoint_path
       checkpoint_dir = args.checkpoint_dir
@@ -77,6 +77,7 @@ def train(**kwargs):
       steps = kwargs.get('steps_per_epoch',100)
       lr = kwargs.get('lr',2e-5)
       wd = kwargs.get('wd',0.01)
+      encoding_type = kwargs.get('encoding_type','rotary')
       checkpoint_path = kwargs.get('model_checkpoint_path','')
       checkpoint_steps = kwargs.get('checkpoint_steps',500)
       checkpoint_dir = kwargs.get('checkpoint_dir',os.path.join(dir_path,'checkpoints'))
@@ -91,6 +92,7 @@ def train(**kwargs):
     assert max_sequence_length > 0
     assert lr > 0 
     assert wd > 0
+    assert encoding_type in ['rotary']
     assert epochs > 0 
     assert steps > 0 
     assert checkpoint_steps > 0
@@ -115,6 +117,7 @@ def train(**kwargs):
 
     config = APTConfig()
     config.attention_mode="APT"
+    config.position_embedding = encoding_type
     
     if os.path.isfile(checkpoint_path):
       model = APTLMHeadModel.from_pretrained(model_checkpoint_path,config=config)
