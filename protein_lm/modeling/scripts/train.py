@@ -66,7 +66,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config-file",
-        default="protein_lm/configs/train/toy.yaml",
+        default="protein_lm/configs/train/toy_localcsv.yaml",
         type=str,
         help="Config yaml for training",
     )
