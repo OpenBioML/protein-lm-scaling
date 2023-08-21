@@ -44,7 +44,7 @@ def get_training_args(config_dict: Dict) -> TrainingArguments:
         num_train_epochs=config.num_train_epochs,
         per_device_train_batch_size=config.per_device_train_batch_size,
         learning_rate=config.learning_rate,
-        weight_decay=config.learning_rate,
+        weight_decay=config.weight_decay,
         save_strategy=config.save_strategy,
         save_steps=config.save_steps,
         report_to=config.report_to,
