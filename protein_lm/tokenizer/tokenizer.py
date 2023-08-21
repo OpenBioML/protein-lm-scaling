@@ -50,12 +50,11 @@ class Tokenizer:
         output = []
         if max_sequence_length is None and return_tensors:
             max_sequence_length = max([len(sequence) for sequence in sequences])
-        if add_special_tokens:
-            max_sequence_length -= 2
         if max_sequence_length is not None:
-            sequences = [sequence[:max_sequence_length] for sequence in sequences]
-        if add_special_tokens:
-            max_sequence_length += 2
+            sequences = [
+                sequence[:(max_sequence_length - 2) if add_special_tokens else max_sequence_length] 
+                for sequence in sequences
+            ]
         for sequence in sequences:
             output.append(self.encode(sequence, add_special_tokens, return_tensors))
         if return_tensors:
