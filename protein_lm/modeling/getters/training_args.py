@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Union
+from typing import Dict, List, Union
 
 from pydantic import BaseModel, FieldValidationInfo, field_validator
 from transformers import TrainingArguments
@@ -15,6 +15,8 @@ class TrainingArgsConfig(BaseModel):
     output_dir: str
     save_strategy: str
     report_to: str
+    label_names: List[str]
+    no_cuda: bool
 
     @field_validator(
         "per_device_train_batch_size",
@@ -38,17 +40,6 @@ def get_training_args(config_dict: Dict) -> TrainingArguments:
         print(f"creating checkpoint directory at {config.output_dir}")
         os.makedirs(config.output_dir)
 
-    training_args = TrainingArguments(
-        output_dir=config.output_dir,
-        max_steps=config.max_steps,
-        num_train_epochs=config.num_train_epochs,
-        per_device_train_batch_size=config.per_device_train_batch_size,
-        learning_rate=config.learning_rate,
-        weight_decay=config.weight_decay,
-        save_strategy=config.save_strategy,
-        save_steps=config.save_steps,
-        report_to=config.report_to,
-        label_names=["labels"],
-        no_cuda=False,
+    return TrainingArguments(
+        **config_dict,
     )
-    return training_args
