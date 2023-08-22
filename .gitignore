@@ -1,4 +1,4 @@
-/data/ProteinGym/
+protein_lm/dataset/ProteinGym/
 /esm2*/
 *.lock
 *.pyc

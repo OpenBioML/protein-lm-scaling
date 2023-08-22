@@ -62,7 +62,7 @@ import requests, zipfile, io, os
 
 # this function takes the first row of a given DMS dataframe and corrects the given mutant
 # in the given sequence to get the base sequence
-def get_base_sequence(df: pd.DataFrame):
+def get_base_sequence():
     mutations = df.loc[0, "mutant"].split(':')
     seq = df.loc[0, "mutated_sequence"]
     for mutation in mutations:
@@ -82,7 +82,7 @@ def label_seq(seq, base_seq, ):
 
 # %%
 # download substitutions, unzip, save to disk
-path = "data/ProteinGym/"
+path = "protein_lm/dataset/ProteinGym/"
 sub_url = "https://marks.hms.harvard.edu/proteingym/ProteinGym_substitutions.zip"
 
 if os.path.exists(path + "ProteinGym_substitutions"):
@@ -148,7 +148,7 @@ checkpoint = "facebook/esm2_t33_650M_UR50D"
 tokenizer = AptTokenizer()
 
 def tokenize(batch):
-    tokens = tokenizer(batch["mutated_sequence"], return_tensors=True, max_length=760)
+    tokens = tokenizer(batch["mutated_sequence"], return_tensors=True, max_sequence_length=760)
     return {"input_ids": tokens}
 
 token_data = dataset.map(tokenize, batched=True)
