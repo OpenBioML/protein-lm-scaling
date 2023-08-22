@@ -11,6 +11,37 @@
 # to be more flexible with our own models.  
 ######################################################################################################
 # %%
+import os
+# funtiion to check if cwd is correct
+def set_to_base_directory(repo_name):
+    # Get the current working directory
+    current_dir = os.getcwd()
+
+    # Check if the repo name is in the path
+    if repo_name in current_dir.split(os.sep)[-1]:
+        print("Current directory is already the base directory of the repo.")
+    else:
+        print("Setting current directory as the base directory of the repo...")
+        
+        # Search for the repo name in the path
+        base_dir = None
+        path_parts = current_dir.split(os.sep)
+        for i in range(len(path_parts) - 1, -1, -1):
+            if path_parts[i] == repo_name:
+                base_dir = os.sep.join(path_parts[:i+1])
+                break
+        
+        if base_dir:
+            os.chdir(base_dir)
+            print("Changed to base directory:", base_dir)
+        else:
+            print("Repo name not found in the path.")
+
+# check if cwd is base folder of repo
+# needs to be moved intop main later
+repo_name = "protein-lm-scaling"
+set_to_base_directory(repo_name)
+
 # huggingface
 from transformers import AutoTokenizer, DataCollatorWithPadding, AutoModelForSequenceClassification, TrainingArguments, Trainer
 from datasets import load_dataset
