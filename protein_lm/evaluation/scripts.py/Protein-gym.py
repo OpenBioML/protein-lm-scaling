@@ -67,6 +67,10 @@ nogpu = False
 # scoring strategy for zero shot"
 # choose out of: ["wt-marginals", "masked-marginals", "pseudo-ppl"]
 scoring_strategy = 'wt-marginals'
+# column that holds info on mutations
+mutation_col = 0
+# offset index, default was zero, but in our case it needs to be one
+offset_idx = 1
 # relative output path 
 dms_output =  "protein_lm/evaluation/output/{}".format(scoring_strategy)
 # %%
@@ -222,9 +226,9 @@ else:
         
     import torch
 
-    from protein_lm.modeling.models.esm.data import Alphabet, FastaBatchedDataset
-    from protein_lm.modeling.models.esm import pretrained
-    from protein_lm.modeling.models.esm.model.msa_transformer import MSATransformer
+    from protein_lm.modeling.models.fair_esm.data import Alphabet, FastaBatchedDataset
+    from protein_lm.modeling.models.fair_esm import pretrained
+    from protein_lm.modeling.models.fair_esm.model.msa_transformer import MSATransformer
     import pandas as pd
     from tqdm import tqdm
     from Bio import SeqIO
@@ -342,7 +346,7 @@ else:
             # token_probs = torch.cat(all_token_probs, dim=0).unsqueeze(0)
             # dms_df[model_location + "_" + experiment] = dms_df.apply(
             #     lambda row: label_row(
-            #         row[args.mutation_col], sequence, token_probs, alphabet, args.offset_idx
+            #         row[mutation_col], sequence, token_probs, alphabet, offset_idx
             #     ),
             #     axis=1,
             # )
@@ -358,11 +362,11 @@ else:
                     token_probs = torch.log_softmax(model(batch_tokens.cuda())["logits"], dim=-1)
                 dms_df[model_location + "_" + experiment] = dms_df.apply(
                     lambda row: label_row(
-                        row[args.mutation_col],
+                        row[mutation_col],
                         sequence,
                         token_probs,
                         alphabet,
-                        args.offset_idx,
+                        offset_idx,
                     ),
                     axis=1,
                 )
@@ -379,11 +383,11 @@ else:
                 token_probs = torch.cat(all_token_probs, dim=0).unsqueeze(0)
                 dms_df[model_location + "_" + experiment] = dms_df.apply(
                     lambda row: label_row(
-                        row[args.mutation_col],
+                        row[mutation_col],
                         sequence,
                         token_probs,
                         alphabet,
-                        args.offset_idx,
+                        offset_idx,
                     ),
                     axis=1,
                 )
@@ -391,7 +395,7 @@ else:
                 tqdm.pandas()
                 dms_df[model_location + "_" + experiment] = dms_df.progress_apply(
                     lambda row: compute_pppl(
-                        row[args.mutation_col], sequence, model, alphabet, args.offset_idx
+                        row[mutation_col], sequence, model, alphabet, offset_idx
                     ),
                     axis=1,
                 )

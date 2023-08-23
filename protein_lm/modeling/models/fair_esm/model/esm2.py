@@ -7,8 +7,8 @@ from typing import Union
 import torch
 import torch.nn as nn
 
-from protein_lm.modeling.models.esm.data import Alphabet
-from protein_lm.modeling.models.esm.modules import ContactPredictionHead, ESM1bLayerNorm, RobertaLMHead, TransformerLayer
+from protein_lm.modeling.models.fair_esm.data import Alphabet
+from protein_lm.modeling.models.fair_esm.modules import ContactPredictionHead, ESM1bLayerNorm, RobertaLMHead, TransformerLayer
 
 
 class ESM2(nn.Module):
