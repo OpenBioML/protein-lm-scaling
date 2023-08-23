@@ -11,8 +11,8 @@ from pathlib import Path
 
 import torch
 
-import esm
-from esm.model.esm2 import ESM2
+# from protein_lm.modeling.models.esm.data import Alphabet
+from protein_lm.modeling.models.esm.model.esm2 import ESM2
 
 
 def _has_regression_weights(model_name):
@@ -162,6 +162,7 @@ def _load_model_and_alphabet_core_v1(model_data):
 
 
 def _load_model_and_alphabet_core_v2(model_data):
+    from protein_lm.modeling.models.esm.data import Alphabet
     def upgrade_state_dict(state_dict):
         """Removes prefixes 'model.encoder.sentence_encoder.' and 'model.encoder.'."""
         prefixes = ["encoder.sentence_encoder.", "encoder."]
@@ -172,7 +173,7 @@ def _load_model_and_alphabet_core_v2(model_data):
     cfg = model_data["cfg"]["model"]
     state_dict = model_data["model"]
     state_dict = upgrade_state_dict(state_dict)
-    alphabet = esm.data.Alphabet.from_architecture("ESM-1b")
+    alphabet = Alphabet.from_architecture("ESM-1b")
     model = ESM2(
         num_layers=cfg.encoder_layers,
         embed_dim=cfg.encoder_embed_dim,

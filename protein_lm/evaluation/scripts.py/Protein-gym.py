@@ -56,83 +56,84 @@ import numpy as np
 import pandas as pd
 # http requests
 import requests, zipfile, io, os
-
-# %%
-############################################## Functions ################################################ 
-
-# this function takes the first row of a given DMS dataframe and corrects the given mutant
-# in the given sequence to get the base sequence
-def get_base_sequence():
-    mutations = df.loc[0, "mutant"].split(':')
-    seq = df.loc[0, "mutated_sequence"]
-    for mutation in mutations:
-        base_AA = mutation[0]
-        # mut_AA = mutation[-1]
-        position = int(mutation[1:-1])
-        # index seq at given position - 1 as the AA index doesn't start at 0
-        base_seq = seq[:position - 1] + base_AA + seq[position:] 
-        seq = base_seq
-    return base_seq
-
-def label_seq(seq, base_seq, ):
-    # this function computes the score for a given sequence and base sequence
-    # the way to go is to mask the token, that we know is mutated and let the model fill in the mask.
-    # then compute the score by substracting the topken probabilities of the WT with the MT probs
-    pass
-
+#####################################################################
+# SOME VARIABLES    
+# relative protgym path
+path = "protein_lm/dataset/ProteinGym/"
+# run supervised benchmark
+supervised=False
+# run zero shot benchmark without gpu
+nogpu = False
+# scoring strategy for zero shot"
+# choose out of: ["wt-marginals", "masked-marginals", "pseudo-ppl"]
+scoring_strategy = 'wt-marginals'
+# relative output path 
+dms_output =  "protein_lm/evaluation/output/{}".format(scoring_strategy)
 # %%
 # download substitutions, unzip, save to disk
-path = "protein_lm/dataset/ProteinGym/"
-sub_url = "https://marks.hms.harvard.edu/proteingym/ProteinGym_substitutions.zip"
+dat_url = "https://marks.hms.harvard.edu/proteingym/ProteinGym_substitutions.zip"
 
 if os.path.exists(path + "ProteinGym_substitutions"):
     print("substitution data is already here :)")
 else:
     print("download substitution data ...")
-    r = requests.get(sub_url)
+    r = requests.get(dat_url)
     z = zipfile.ZipFile(io.BytesIO(r.content))
     z.extractall(path)
 
 # download indels, unzip, save to disk
-sub_url = "https://marks.hms.harvard.edu/proteingym/ProteinGym_indels.zip"
+dat_url = "https://marks.hms.harvard.edu/proteingym/ProteinGym_indels.zip"
 
 if os.path.exists(path + "ProteinGym_indels"):
     print("indel data is already here :)")
 else:
     print("download indel data ...")
-    r = requests.get(sub_url)
+    r = requests.get(dat_url)
     z = zipfile.ZipFile(io.BytesIO(r.content))
     z.extractall(path)
 
+# download ref files
+dat_url = "https://raw.githubusercontent.com/OATML-Markslab/ProteinGym/main/ProteinGym_reference_file_substitutions.csv"
+if os.path.exists(path + "ProteinGym_reference_file_substitutions.csv"):
+    print("Substitution reference file is already here :)")
+else:
+    print("download substitution reference ...")
+    r = requests.get(dat_url)
+    df = pd.read_csv(io.BytesIO(r.content))
+    df.to_csv(path + "ProteinGym_reference_file_substitutions.csv", index=False)
+
+dat_url = "https://raw.githubusercontent.com/OATML-Markslab/ProteinGym/main/ProteinGym_reference_file_indels.csvv"
+if os.path.exists(path + "ProteinGym_reference_file_indels.csv"):
+    print("Indel reference file is already here :)")
+else:
+    print("download Indel reference ...")
+    r = requests.get(dat_url)
+    df = pd.read_csv(io.BytesIO(r.content))
+    df.to_csv(path + "ProteinGym_reference_file_indels.csv", index=False)
 # %%
 # load substitution data, introduce whitespeces and CLS/EOS tokens
 # save complete data as csv, load as HF dataset
-if os.path.exists(path + "ProteinGym_substitutions.csv") and os.path.exists(path + "ProteinGym_substitutions_base_seqs.csv"):
+if os.path.exists(path + "ProteinGym_substitutions.csv"):
     print("preprocessing was already done, load csv")
     dataset = load_dataset("csv", data_files=(path + "ProteinGym_substitutions.csv"))
-    base_seqs = pd.read_csv(path + "ProteinGym_substitutions_base_seqs.csv")
 else:
     print("preprocess substitutions ...")
     folder_path = "data/ProteinGym/ProteinGym_substitutions"
     all_data = []
-    base_seqs = {} # init dict to save baseseqs
     for filename in os.listdir(folder_path):
         if filename.endswith('.csv'):
             file_path = os.path.join(folder_path, filename)
             df = pd.read_csv(file_path)
             experiment = filename[:-4]
-            # save base_seqs, as experiment:sequence pair, needs to be before changing mutant name :)
-            base_seqs[experiment] = get_base_sequence(df)
+    
+    
             # add experiment name to track and get base sequence for zero-shot tasks
             df["mutant"] = experiment + "_" + df["mutant"]
             all_data.append(df)
             
     # get dataframe
     merged_data = pd.concat(all_data, ignore_index=True)
-    base_seqs = pd.DataFrame(base_seqs, index=["base_seq"]).T
-    base_seqs = base_seqs.reset_index(names="experiment")
     # save the baseseqs
-    base_seqs.to_csv(path + "ProteinGym_substitutions_base_seqs.csv", index=False)
     # Add spaces between each amino acid in the 'mutated_sequences' column
     # merged_data['mutated_sequence'] = merged_data['mutated_sequence'].apply(lambda seq: ' '.join(list(seq)))
     # add cls and end tokens
@@ -175,7 +176,6 @@ test_dataset = dict_train_test['test']
 # valid_dataset = dict_test_valid['train']
 # %%  taken from facebooks pretrained-finetuning notebook here: 
 # https://colab.research.google.com/github/huggingface/notebooks/blob/main/examples/protein_language_modeling.ipynb#scrollTo=fc164b49
-supervised=False
 if supervised:
     # load model for seq classification
     num_labels = 2
@@ -219,4 +219,184 @@ if supervised:
 else:
     # here we'll add a zero-shot eval script like this: 
     # https://github.com/facebookresearch/esm/blob/main/examples/variant-prediction/predict.py
-    pass
+        
+    import torch
+
+    from protein_lm.modeling.models.esm.data import Alphabet, FastaBatchedDataset
+    from protein_lm.modeling.models.esm import pretrained
+    from protein_lm.modeling.models.esm.model.msa_transformer import MSATransformer
+    import pandas as pd
+    from tqdm import tqdm
+    from Bio import SeqIO
+    import itertools
+    from typing import List, Tuple
+    import numpy as np
+
+
+    def remove_insertions(sequence: str) -> str:
+        """ Removes any insertions into the sequence. Needed to load aligned sequences in an MSA. """
+        # This is an efficient way to delete lowercase characters and insertion characters from a string
+        deletekeys = dict.fromkeys(string.ascii_lowercase)
+        deletekeys["."] = None
+        deletekeys["*"] = None
+
+        translation = str.maketrans(deletekeys)
+        return sequence.translate(translation)
+
+
+    def read_msa(filename: str, nseq: int) -> List[Tuple[str, str]]:
+        """ Reads the first nseq sequences from an MSA file, automatically removes insertions.
+        
+        The input file must be in a3m format (although we use the SeqIO fasta parser)
+        for remove_insertions to work properly."""
+
+        msa = [
+            (record.description, remove_insertions(str(record.seq)))
+            for record in itertools.islice(SeqIO.parse(filename, "fasta"), nseq)
+        ]
+        return msa
+
+
+    def label_row(row, sequence, token_probs, alphabet, offset_idx):
+        wt, idx, mt = row[0], int(row[1:-1]) - offset_idx, row[-1]
+        assert sequence[idx] == wt, "The listed wildtype does not match the provided sequence"
+
+        wt_encoded, mt_encoded = alphabet.get_idx(wt), alphabet.get_idx(mt)
+
+        # add 1 for BOS
+        score = token_probs[0, 1 + idx, mt_encoded] - token_probs[0, 1 + idx, wt_encoded]
+        return score.item()
+
+
+    def compute_pppl(row, sequence, model, alphabet, offset_idx):
+        wt, idx, mt = row[0], int(row[1:-1]) - offset_idx, row[-1]
+        assert sequence[idx] == wt, "The listed wildtype does not match the provided sequence"
+
+        # modify the sequence
+        sequence = sequence[:idx] + mt + sequence[(idx + 1) :]
+
+        # encode the sequence
+        data = [
+            ("protein1", sequence),
+        ]
+
+        batch_converter = alphabet.get_batch_converter()
+
+        batch_labels, batch_strs, batch_tokens = batch_converter(data)
+
+        wt_encoded, mt_encoded = alphabet.get_idx(wt), alphabet.get_idx(mt)
+
+        # compute probabilities at each position
+        log_probs = []
+        for i in range(1, len(sequence) - 1):
+            batch_tokens_masked = batch_tokens.clone()
+            batch_tokens_masked[0, i] = alphabet.mask_idx
+            with torch.no_grad():
+                token_probs = torch.log_softmax(model(batch_tokens_masked.cuda())["logits"], dim=-1)
+            log_probs.append(token_probs[0, i, alphabet.get_idx(sequence[i])].item())  # vocab size
+        return sum(log_probs)
+    
+    # get experiments and base seqs
+    ref_df = pd.read_csv(path + "ProteinGym_reference_file_substitutions.csv")
+    dms_ids = ref_df.DMS_id
+    dms_file = ref_df.DMS_filename
+    dms_ref_seqs = ref_df.target_seq
+
+    for experiment, file_name, sequence in zip(dms_ids, dms_file, dms_ref_seqs):
+
+        # Load the deep mutational scan
+        dms_df_path = path + "ProteinGym_substitutions/" + file_name
+        dms_df = pd.read_csv(dms_df_path)
+        
+        # inference for each model
+        # set checkpoint to be mnodel location for now
+        model_location = checkpoint.split("/")[-1]
+
+        model, alphabet = pretrained.load_model_and_alphabet(model_location)
+        model.eval()
+        if torch.cuda.is_available() and not nogpu:
+            model = model.cuda()
+            print("Transferred model to GPU")
+
+        batch_converter = alphabet.get_batch_converter()
+
+        if isinstance(model, MSATransformer):
+            # as far as I know we do not plan on using this? I kept it around for now.
+            pass
+            # data = [read_msa(args.msa_path, args.msa_samples)]
+            # assert (
+            #     scoring_strategy == "masked-marginals"
+            # ), "MSA Transformer only supports masked marginal strategy"
+
+            # batch_labels, batch_strs, batch_tokens = batch_converter(data)
+
+            # all_token_probs = []
+            # for i in tqdm(range(batch_tokens.size(2))):
+            #     batch_tokens_masked = batch_tokens.clone()
+            #     batch_tokens_masked[0, 0, i] = alphabet.mask_idx  # mask out first sequence
+            #     with torch.no_grad():
+            #         token_probs = torch.log_softmax(
+            #             model(batch_tokens_masked.cuda())["logits"], dim=-1
+            #         )
+            #     all_token_probs.append(token_probs[:, 0, i])  # vocab size
+            # token_probs = torch.cat(all_token_probs, dim=0).unsqueeze(0)
+            # dms_df[model_location + "_" + experiment] = dms_df.apply(
+            #     lambda row: label_row(
+            #         row[args.mutation_col], sequence, token_probs, alphabet, args.offset_idx
+            #     ),
+            #     axis=1,
+            # )
+
+        else:
+            data = [
+                ("protein1", sequence),
+            ]
+            batch_labels, batch_strs, batch_tokens = batch_converter(data)
+
+            if scoring_strategy == "wt-marginals":
+                with torch.no_grad():
+                    token_probs = torch.log_softmax(model(batch_tokens.cuda())["logits"], dim=-1)
+                dms_df[model_location + "_" + experiment] = dms_df.apply(
+                    lambda row: label_row(
+                        row[args.mutation_col],
+                        sequence,
+                        token_probs,
+                        alphabet,
+                        args.offset_idx,
+                    ),
+                    axis=1,
+                )
+            elif scoring_strategy == "masked-marginals":
+                all_token_probs = []
+                for i in tqdm(range(batch_tokens.size(1))):
+                    batch_tokens_masked = batch_tokens.clone()
+                    batch_tokens_masked[0, i] = alphabet.mask_idx
+                    with torch.no_grad():
+                        token_probs = torch.log_softmax(
+                            model(batch_tokens_masked.cuda())["logits"], dim=-1
+                        )
+                    all_token_probs.append(token_probs[:, i])  # vocab size
+                token_probs = torch.cat(all_token_probs, dim=0).unsqueeze(0)
+                dms_df[model_location + "_" + experiment] = dms_df.apply(
+                    lambda row: label_row(
+                        row[args.mutation_col],
+                        sequence,
+                        token_probs,
+                        alphabet,
+                        args.offset_idx,
+                    ),
+                    axis=1,
+                )
+            elif scoring_strategy == "pseudo-ppl":
+                tqdm.pandas()
+                dms_df[model_location + "_" + experiment] = dms_df.progress_apply(
+                    lambda row: compute_pppl(
+                        row[args.mutation_col], sequence, model, alphabet, args.offset_idx
+                    ),
+                    axis=1,
+                )
+    # check if output path exists
+    if not os.path.exists(dms_output):
+        os.makedirs(dms_output)
+
+    dms_df.to_csv(dms_output)
