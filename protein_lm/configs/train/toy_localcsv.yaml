@@ -25,10 +25,10 @@ training_args:
 tokenizer:
   tokenizer_type: "APT"
 
-# corresponds to ModelConfig
+# corresponds to NNModelConfig
 model:
-  model_type: "APT"
-  model_config_args:
+  nn_model_type: "APT"
+  nn_model_config_args:
     attention_mode: "APT"
     position_embedding: "rotary"
   pretrained_checkpoint: null

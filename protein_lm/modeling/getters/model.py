@@ -7,22 +7,24 @@ from protein_lm.modeling.models.apt.config import APTConfig
 from protein_lm.modeling.models.apt.model_pytorch import APTLMHeadModel
 
 
-class ModelConfig(BaseModel):
+class NNModelConfig(BaseModel):
     # If desired, this can be modified to support a variety of model types
-    model_type: Literal["APT"]
-    model_config_args: Dict
+    # Note: "nn_model_.." because anything with the "model_" prefix leads to
+    # pydantic namespace warnings
+    nn_model_type: Literal["APT"]
+    nn_model_config_args: Dict
     pretrained_checkpoint: Optional[str]
 
 
 def get_model(config_dict: Dict):
-    config = ModelConfig(**config_dict)
-    if config.model_type == "APT":
+    config = NNModelConfig(**config_dict)
+    if config.nn_model_type == "APT":
         model_constructor = APTLMHeadModel
         model_config_constructor = APTConfig
     else:
-        raise ValueError(f"Invalid ModelConfig.model_type {config.model_type}")
+        raise ValueError(f"Invalid NNModelConfig.nn_model_type {config.nn_model_type}")
 
-    model_config = model_config_constructor(**config.model_config_args)
+    model_config = model_config_constructor(**config.nn_model_config_args)
     if config.pretrained_checkpoint is None:
         model = model_constructor(config=model_config)
     else:
