@@ -1,4 +1,4 @@
-from typing import Any, Dict, Literal, Optional
+from typing import Dict, Literal, Optional
 
 import torch
 from pydantic import BaseModel
