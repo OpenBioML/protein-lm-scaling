@@ -1,11 +1,11 @@
 import torch
-from typing import List, Union
+from typing import List, Union, Optional
 
 from rust_trie import Trie 
 
 
 class Tokenizer:
-    def __init__(self, tokens: List[str], unk_token_id: int = None):
+    def __init__(self, tokens: List[str], unk_token_id: Optional[int] = None):
         self.ids_to_tokens = tokens
         self.trie = Trie(unk_token_id)
         for token in tokens:
@@ -27,7 +27,7 @@ class Tokenizer:
         sequence: str, 
         add_special_tokens: bool = False,
         return_tensor: bool = False,
-        max_sequence_length: int = None,
+        max_sequence_length: Optional[int] = None,
     ) -> List[int]:
         if max_sequence_length is not None:
             if add_special_tokens:
@@ -45,17 +45,16 @@ class Tokenizer:
         sequences: List[str],
         add_special_tokens: bool = False,
         return_tensors: bool = False,
-        max_sequence_length: int = None,
+        max_sequence_length: Optional[int] = None,
     ) -> List[List[int]]:
         output = []
         if max_sequence_length is None and return_tensors:
             max_sequence_length = max([len(sequence) for sequence in sequences])
-        if add_special_tokens:
-            max_sequence_length -= 2
         if max_sequence_length is not None:
-            sequences = [sequence[:max_sequence_length] for sequence in sequences]
-        if add_special_tokens:
-            max_sequence_length += 2
+            sequences = [
+                sequence[:(max_sequence_length - 2) if add_special_tokens else max_sequence_length] 
+                for sequence in sequences
+            ]
         for sequence in sequences:
             output.append(self.encode(sequence, add_special_tokens, return_tensors))
         if return_tensors:
