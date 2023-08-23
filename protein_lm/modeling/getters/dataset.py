@@ -1,6 +1,5 @@
 from typing import Dict, Literal, Optional
 
-import pandas as pd
 from datasets import Dataset, load_dataset
 from pydantic import BaseModel
 
