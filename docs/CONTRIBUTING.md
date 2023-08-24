@@ -13,7 +13,6 @@ First, make sure you have a GitHub account and have git installed locally. Then,
 3. [Create a new branch](https://git-scm.com/book/en/v2/Git-Branching-Basic-Branching-and-Merging).
 4. Make your code contributions on this new branch.
 5. [Create a PR from your fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork) to our repository.
-6. When you are ready, [request a review](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/requesting-a-pull-request-review) from the project lead who created the issue.
 
 (For subsequent pull requests, skip steps 1 and 2 and start directly from step 3.)
 
