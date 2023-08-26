@@ -1,6 +1,11 @@
 # Contributing
 
-If you are looking for ways to contribute, please check out our [task board](https://github.com/orgs/OpenBioML/projects/8) or our [open issues](https://github.com/OpenBioML/protein-lm-scaling/issues).
+If you are looking for ways to contribute, please check out our [task board](https://github.com/orgs/OpenBioML/projects/8) or our [open issues](https://github.com/OpenBioML/protein-lm-scaling/issues)!
+
+
+## Issue Assignment
+
+If you see an interesting issue, please feel free to comment or ask questions! Issues are generally resolved by code changes to our repository via a [pull request](#creating-a-pull-request). If you would like to be the one responsible for the code changes corresponding to an issue, and if nobody else has already been assigned to the issue, you can be assigned the issue by asking the issue creator or one of the moderators of repository, or by self-assigning the issue by commenting with `/take`.
 
 ## Creating a Pull Request
 
