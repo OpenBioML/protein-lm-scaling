@@ -9,7 +9,7 @@ class APTConfig(GPT2Config):
     def __init__(
         self,
         attention_mode="APT",
-        position_embedding="rotary",
+        position_embedding="learned",
         tokenizer=None,
         **kwargs
     ):

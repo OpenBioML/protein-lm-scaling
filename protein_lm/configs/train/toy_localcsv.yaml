@@ -30,7 +30,7 @@ model:
   nn_model_type: "APT"
   nn_model_config_args:
     attention_mode: "APT"
-    position_embedding: "rotary"
+    position_embedding: "learned"
   pretrained_checkpoint: null
 
 # corresponds to DataCollatorConfig
