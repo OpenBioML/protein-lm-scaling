@@ -15,6 +15,8 @@ class Tokenizer:
             self.ids_to_tokens += ["<unk>"]
         self.pad_token_id = self.ids_to_tokens.index("<pad>")
         self.mask_token_id = self.ids_to_tokens.index("<mask>")
+        self.middle_span_id = self.ids_to_tokens.index("<middle_span>")
+        self.end_span_id=self.ids_to_tokens.index("<end_of_span>")
 
     def __call__(self, sequences: Union[str, List], *args, **kwargs):
         if isinstance(sequences, str):
@@ -39,6 +41,9 @@ class Tokenizer:
         if return_tensor:
             output = torch.tensor(output, dtype=torch.long)
         return output
+
+    def mask_token(self):
+      return "<mask>"
 
     def batch_encode(
         self,
@@ -89,6 +94,6 @@ class AptTokenizer(Tokenizer):
             "<cls>", "<pad>", "<eos>", "L", "A", "G", "V", 
             "S", "E", "R", "T", "I", "D", "P", "K", "Q", "N", 
             "F", "Y", "M", "H", "W", "C", "B", "U", "Z", "O", 
-            "<mask>"
+            "<mask>","<middle_span>","<end_of_span>"
         ]
         super().__init__(tokens)
