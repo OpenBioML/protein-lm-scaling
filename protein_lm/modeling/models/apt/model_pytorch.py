@@ -9,7 +9,8 @@ from transformers.pytorch_utils import Conv1D
 from transformers.activations import ACT2FN
 from transformers.utils import logging
 from protein_lm.modeling.utils.rotary_embedding import RotaryEmbedding
-from protein_lm.modeling.utils.alibi_embedding import get_slopes
+from protein_lm.modeling.utils.rerope_embedding import RectifiedRotaryEmbedding
+from protein_lm.modeling.utils.alibi_embedding import create_alibi_tensor
 
 
 logger = logging.get_logger(__name__)
@@ -17,17 +18,17 @@ logger = logging.get_logger(__name__)
 class APTAttention(GPT2Attention):
     def __init__(self, config, is_cross_attention=False, layer_idx=None):
         super().__init__(config, is_cross_attention=is_cross_attention, layer_idx=layer_idx)
-
-        max_positions = config.max_position_embeddings
+        self.max_positions = config.max_position_embeddings
         self.register_buffer(
             "bias",
-            torch.tril(torch.ones((max_positions, max_positions), dtype=torch.bool)).view(
-                1, 1, max_positions, max_positions
+            torch.tril(torch.ones((self.max_positions, self.max_positions), dtype=torch.bool)).view(
+                1, 1, self.max_positions, self.max_positions
             ),
             persistent=False,
         )
         self.register_buffer("masked_bias", torch.tensor(-1e4), persistent=False)
-
+        self.position_embedding = config.position_embedding
+        self.max_sequence_length = config.max_sequence_length
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
         self.head_dim = self.embed_dim // self.num_heads
@@ -59,8 +60,11 @@ class APTAttention(GPT2Attention):
         self.pruned_heads = set()
 
         self.rot_emb=None
-        if config.position_embedding == "rotary":
+        if self.position_embedding == "rope":
             self.rot_emb=RotaryEmbedding(dim=self.head_dim)
+        elif self.position_embedding == "rerope":
+            self.rot_emb = RectifiedRotaryEmbedding(dim=self.head_dim,max_position_embeddings = self.max_positions)
+
     
 
     def _attn(self, query, key, value, attention_mask=None, head_mask=None,alibi_bias=None):
@@ -84,7 +88,6 @@ class APTAttention(GPT2Attention):
             # Need to be on the same device, otherwise `RuntimeError: ..., x and y to be on the same device`
             mask_value = torch.full([], mask_value, dtype=attn_weights.dtype).to(attn_weights.device)
             attn_weights = torch.where(causal_mask, attn_weights.to(attn_weights.dtype), mask_value)
-
         if alibi_bias is not None:
             attn_weights = attn_weights + alibi_bias[:,:,:attn_weights.size(-1)]
         
@@ -173,6 +176,8 @@ class APTAttention(GPT2Attention):
         use_cache: Optional[bool] = False,
         output_attentions: Optional[bool] = False,
         alibi_bias: Optional[Tuple[torch.Tensor]] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+
     ) -> Tuple[Union[torch.Tensor, Tuple[torch.Tensor]], ...]:
         if encoder_hidden_states is not None:
             if not hasattr(self, "q_attn"):
@@ -190,10 +195,21 @@ class APTAttention(GPT2Attention):
         query = self._split_heads(query, self.num_heads, self.head_dim)
         key = self._split_heads(key, self.num_heads, self.head_dim)
         value = self._split_heads(value, self.num_heads, self.head_dim)
+        
 
-        # Apply rotary embedding to query and key
+
+       
+        # Apply rope embedding to query and key
         if self.rot_emb:
-            query, key = self.rot_emb(query,key)
+            if self.position_embedding == 'rope':
+                query, key = self.rot_emb(query,key)
+            elif self.position_embedding == 'rerope':
+                bsz, q_len, _ = hidden_states.size()
+                query = query.reshape(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+                query *= ((position_ids + 1)[:, None, :, None].log() / torch.log(torch.tensor(self.max_sequence_length)).item()).clip(1).to(query.dtype)
+                query, key = self.rot_emb(query,key,seq_len = self.max_sequence_length,position_ids=position_ids)
+
+        
             
         if layer_past is not None:
             past_key, past_value = layer_past
@@ -265,6 +281,8 @@ class APTBlock(nn.Module):
         use_cache: Optional[bool] = False,
         output_attentions: Optional[bool] = False,
         alibi_bias: Optional[torch.FloatTensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+
     ) -> Union[Tuple[torch.Tensor], Optional[Tuple[torch.Tensor, Tuple[torch.FloatTensor, ...]]]]:
         residual = hidden_states
         hidden_states = self.ln_1(hidden_states)
@@ -275,7 +293,8 @@ class APTBlock(nn.Module):
             head_mask=head_mask,
             use_cache=use_cache,
             output_attentions=output_attentions,
-            alibi_bias=alibi_bias
+            alibi_bias=alibi_bias,
+            position_ids=position_ids,
         )
         attn_output = attn_outputs[0]  # output_attn: a, present, (attentions)
         outputs = attn_outputs[1:]
@@ -329,19 +348,16 @@ class APTModel(GPT2PreTrainedModel):
         self.wte = nn.Embedding(config.vocab_size, self.embed_dim)
         self.position_embedding = config.position_embedding if hasattr(config, "position_embedding") else "learned"
         
-        if self.position_embedding=="learned" or self.position_embedding == 'rotary':
+        if self.position_embedding=="learned" or self.position_embedding == 'rope' or self.position_embedding == 'rerope':
             self.wpe = nn.Embedding(config.max_position_embeddings, self.embed_dim)
             self.alibi = None
         elif self.position_embedding=="alibi":
             maxpos = config.n_positions
             attn_heads = config.n_head
-            self.slopes = torch.Tensor(get_slopes(attn_heads))
-            #The softmax operation is invariant to translation, and bias functions used are always linear. 
-            alibi = self.slopes.unsqueeze(1).unsqueeze(1) * torch.arange(maxpos).unsqueeze(0).unsqueeze(0).expand(attn_heads, -1, -1)
-            alibi = alibi.view(attn_heads, 1, maxpos)
+            alibi = create_alibi_tensor(attn_heads,maxpos)
             self.register_buffer('alibi',alibi)
         else:
-            raise Exception(f'position_embedding {self.position_embedding} not supported. Please select one of learned,rotary or alibi')
+            raise Exception(f'position_embedding {self.position_embedding} not supported. Please select one of learned,rope,rerope or alibi')
         
         self.drop = nn.Dropout(config.embd_pdrop)
         self.h = nn.ModuleList([APTBlock(config, layer_idx=i) for i in range(config.num_hidden_layers)])
@@ -446,7 +462,7 @@ class APTModel(GPT2PreTrainedModel):
         if inputs_embeds is None:
             inputs_embeds = self.wte(input_ids)
 
-        if self.position_embedding=="learned" or self.position_embedding == 'rotary' :
+        if self.position_embedding=="learned" or self.position_embedding == 'rope' :
             position_embeds = self.wpe(position_ids)
             hidden_states = inputs_embeds + position_embeds
         else:
@@ -515,7 +531,8 @@ class APTModel(GPT2PreTrainedModel):
                     encoder_attention_mask=encoder_attention_mask,
                     use_cache=use_cache,
                     output_attentions=output_attentions,
-                    alibi_bias=self.alibi if hasattr(self, "alibi") else None
+                    alibi_bias=self.alibi if hasattr(self, "alibi") else None,
+                    position_ids=position_ids
                 )
 
             hidden_states = outputs[0]
