@@ -462,7 +462,7 @@ class APTModel(GPT2PreTrainedModel):
         if inputs_embeds is None:
             inputs_embeds = self.wte(input_ids)
 
-        if self.position_embedding=="learned" or self.position_embedding == 'rope' :
+        if self.position_embedding=="learned" or self.position_embedding == 'rope' or self.position_embedding == 'rerope' :
             position_embeds = self.wpe(position_ids)
             hidden_states = inputs_embeds + position_embeds
         else:
