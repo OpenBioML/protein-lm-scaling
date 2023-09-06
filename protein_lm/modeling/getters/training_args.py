@@ -21,7 +21,6 @@ class TrainingArgsConfig(BaseModel):
     @field_validator(
         "per_device_train_batch_size",
         "num_train_epochs",
-        "max_steps",
         "weight_decay",
         "learning_rate",
         "save_steps",
