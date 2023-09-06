@@ -10,7 +10,7 @@ import numpy as np
 
 class FimDataCollator(DataCollatorForLanguageModeling):
     def __init__(self,
-        tokenizer=AptTokenizer,     
+        tokenizer=None,     
         min_span_len: int = 1, 
         max_span_len: int = 10,
         fim_freq: float = 0.5, 
@@ -18,20 +18,28 @@ class FimDataCollator(DataCollatorForLanguageModeling):
         mlm=False,
         **kwargs ):
 
-        super().__init__(tokenizer=tokenizer,mlm_probability=mlm_probability, **kwargs)
+        if tokenizer is None:
+            self.tokenizer=AptTokenizer()
+        else:
+            self.tokenizer=tokenizer
+
+        super().__init__(tokenizer=self.tokenizer,mlm_probability=mlm_probability, **kwargs)
         self.fim_freq = fim_freq
-        self.tokenizer=AptTokenizer()
         self.min_span_len=  min_span_len
         self.max_span_len= max_span_len
         self.mlm=mlm
 
     def fim_transform(self, inputs):
-        max_span_len = min(self.max_span_len, inputs.shape[-1])
+        assert self.min_span_len <= self.max_span_len, "min_span_len cannot be larger than max_span_len"
+        if inputs.shape[0] < 5:
+            return inputs
+        max_span_len = min(self.max_span_len, inputs.shape[0])
+
         if self.min_span_len == max_span_len:
-          span_len=self.min_span_len
+            span_len=self.min_span_len
         else:
-          span_len=random.randint(self.min_span_len, max_span_len)
-        span_start=random.randint(0,inputs.shape[-1]-span_len)
+            span_len=random.randint(self.min_span_len, max_span_len)
+        span_start=random.randint(0,inputs.shape[0]-span_len)
         span_end=span_start + span_len
         middle_span_token = torch.tensor([self.tokenizer.middle_span_id], dtype=torch.long, device=inputs.device)
         end_span_token = torch.tensor([self.tokenizer.end_span_id], dtype=torch.long, device=inputs.device)
@@ -45,6 +53,7 @@ class FimDataCollator(DataCollatorForLanguageModeling):
         ]
 
         inputs=torch.cat(fim_transformation)
+
         return inputs
   
     
@@ -67,22 +76,22 @@ class FimDataCollator(DataCollatorForLanguageModeling):
             )
         else:
 
-          if random.random() > self.fim_freq:
-            #print("start",batch["input_ids"].shape)
-            fim_batch= [self.fim_transform(inputs).unsqueeze(0) for inputs in batch['input_ids']]
-            batch['input_ids']=torch.cat(fim_batch)
-            attention_mask = torch.ones_like(batch["input_ids"])
-            batch["attention_mask"] = attention_mask
-            labels=batch['input_ids'].clone()
-            if self.tokenizer.pad_token_id is not None:
-                labels[labels == self.tokenizer.pad_token_id] = -100
-            batch["labels"] = labels
-            #print(batch['input_ids'].shape,batch['labels'].shape,batch["attention_mask"].shape)
+            if random.random() > self.fim_freq:
+                #print("start",batch["input_ids"].shape)
+                fim_batch= [self.fim_transform(inputs).unsqueeze(0) for inputs in batch['input_ids']]
+                batch['input_ids']=torch.cat(fim_batch)
+                attention_mask = torch.ones_like(batch["input_ids"])
+                batch["attention_mask"] = attention_mask
+                labels=batch['input_ids'].clone()
+                if self.tokenizer.pad_token_id is not None:
+                    labels[labels == self.tokenizer.pad_token_id] = -100
+                batch["labels"] = labels
+                #print(batch['input_ids'].shape,batch['labels'].shape,batch["attention_mask"].shape)
 
-          else:
-            labels = batch["input_ids"].clone()
-            if self.tokenizer.pad_token_id is not None:
-                labels[labels == self.tokenizer.pad_token_id] = -100
-            batch["labels"] = labels
+            else:
+                labels = batch["input_ids"].clone()
+                if self.tokenizer.pad_token_id is not None:
+                    labels[labels == self.tokenizer.pad_token_id] = -100
+                batch["labels"] = labels
 
         return batch
