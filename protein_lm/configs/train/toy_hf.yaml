@@ -29,8 +29,8 @@ tokenizer:
 model:
   nn_model_type: "APT"
   nn_model_config_args:
-    attention_mode: "APT"
     position_embedding: "learned"
+    max_sequence_length: 10
   pretrained_checkpoint: null
 
 # corresponds to DataCollatorConfig

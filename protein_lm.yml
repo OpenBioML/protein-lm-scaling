@@ -9,7 +9,9 @@ dependencies:
   - numpy
   - pytorch
   - pydantic>=2.0
+  - rust
   - pip:
       - transformers
       - datasets
       - accelerate
+      - pytest

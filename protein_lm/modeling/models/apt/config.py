@@ -8,13 +8,14 @@ class APTConfig(GPT2Config):
 
     def __init__(
         self,
-        attention_mode="APT",
         position_embedding="learned",
         tokenizer=None,
+        max_sequence_length = 1024,
         **kwargs
     ):
         super().__init__(**kwargs)
         self.nn_model_type = "APT"
-        self.attention_mode = attention_mode
         self.position_embedding = position_embedding
         self.tokenizer = tokenizer
+        self.max_sequence_length = max_sequence_length
+
