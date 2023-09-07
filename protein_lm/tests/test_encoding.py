@@ -6,10 +6,10 @@ import torch
 from protein_lm.modeling.utils.rotary_embedding import RotaryEmbedding
 from protein_lm.modeling.utils.rerope_embedding import RectifiedRotaryEmbedding
 from protein_lm.modeling.utils.alibi_embedding import create_alibi_tensor
-
+from protein_lm.modeling.utils.scaled_rope_embedding import LlamaLinearScalingRotaryEmbedding,LlamaDynamicNTKScalingRotaryEmbedding
 
 assert_equal = functools.partial(torch.testing.assert_close, rtol=0, atol=0)
-encodings = ['rope','rerope','alibi']
+encodings = ['rope','rerope','alibi','linear_rope_scaling','dynamic_rope_scaling']
 @pytest.mark.parametrize("encoding",encodings)
 def test_encoding(encoding):
     if encoding == 'rope':
@@ -53,6 +53,49 @@ def test_encoding(encoding):
         torch.testing.assert_close(qr1,qr2)
         torch.testing.assert_close(kr1,kr2)
 
+    elif encoding == 'linear_rope_scaling':
+        head_dim = 64
+        seq_len = 10
+        scaling_factor=1.0
+        rope_theta=10000
+        rot_emb = LlamaLinearScalingRotaryEmbedding(dim=head_dim,max_position_embeddings=seq_len,scaling_factor=scaling_factor,base=rope_theta)
+        heads = 12
+        position_ids = torch.arange(0,seq_len,dtype=torch.int32).unsqueeze(0)
+        q = torch.zeros(1, heads, seq_len, head_dim) # queries - (batch, heads, seq len, dimension of head)
+        k = torch.zeros(1, heads, seq_len,head_dim) # keys
+        qr,kr = rot_emb(q,k,seq_len=seq_len,position_ids = position_ids)
+        assert_equal(q,qr)
+        assert_equal(k,kr)
+        q = torch.ones(1, heads, seq_len, head_dim) # queries - (batch, heads, seq len, dimension of head)
+        k = torch.ones(1, heads, seq_len,head_dim) # keys
+        qr1,kr1= rot_emb(q,k,seq_len=seq_len,position_ids = position_ids)
+        rerope_path = os.path.join(os.path.dirname(__file__),'tensors','linear_rope.pkl')
+        rerope = torch.load(rerope_path)
+        qr2,kr2 = rerope[0],rerope[1]
+        torch.testing.assert_close(qr1,qr2)
+        torch.testing.assert_close(kr1,kr2)
+
+    elif encoding == "dynamic_rope_scaling":
+        head_dim = 64
+        seq_len = 10
+        scaling_factor=1.0
+        rope_theta=10000
+        rot_emb = LlamaDynamicNTKScalingRotaryEmbedding(dim=head_dim,max_position_embeddings=seq_len,scaling_factor=scaling_factor,base=rope_theta)
+        heads = 12
+        position_ids = torch.arange(0,seq_len,dtype=torch.int32).unsqueeze(0)
+        q = torch.zeros(1, heads, seq_len, head_dim) # queries - (batch, heads, seq len, dimension of head)
+        k = torch.zeros(1, heads, seq_len,head_dim) # keys
+        qr,kr = rot_emb(q,k,seq_len=seq_len,position_ids = position_ids)
+        assert_equal(q,qr)
+        assert_equal(k,kr)
+        q = torch.ones(1, heads, seq_len, head_dim) # queries - (batch, heads, seq len, dimension of head)
+        k = torch.ones(1, heads, seq_len,head_dim) # keys
+        qr1,kr1= rot_emb(q,k,seq_len=seq_len,position_ids = position_ids)
+        rerope_path = os.path.join(os.path.dirname(__file__),'tensors','dynamic_rope.pkl')
+        rerope = torch.load(rerope_path)
+        qr2,kr2 = rerope[0],rerope[1]
+        torch.testing.assert_close(qr1,qr2)
+        torch.testing.assert_close(kr1,kr2)
 
     elif encoding == 'alibi':
         heads = 12
