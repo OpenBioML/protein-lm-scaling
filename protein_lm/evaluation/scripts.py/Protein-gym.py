@@ -72,7 +72,8 @@ mutation_col = 0
 # offset index, default was zero, but in our case it needs to be one
 offset_idx = 1
 # relative output path 
-dms_output =  "protein_lm/evaluation/output/{}".format(scoring_strategy)
+outdir = "protein_lm/evaluation/output/"
+dms_output =  "scores_{}.csv".format(scoring_strategy)
 # %%
 # download substitutions, unzip, save to disk
 dat_url = "https://marks.hms.harvard.edu/proteingym/ProteinGym_substitutions.zip"
@@ -226,9 +227,10 @@ else:
         
     import torch
 
-    from protein_lm.modeling.models.fair_esm.data import Alphabet, FastaBatchedDataset
-    from protein_lm.modeling.models.fair_esm import pretrained
-    from protein_lm.modeling.models.fair_esm.model.msa_transformer import MSATransformer
+    # from protein_lm.modeling.models.fair_esm.data import Alphabet, FastaBatchedDataset
+    # from protein_lm.modeling.models.fair_esm import pretrained
+    # from protein_lm.modeling.models.fair_esm.model.msa_transformer import MSATransformer
+    from esm import pretrained, Alphabet, FastaBatchedDataset, MSATransformer
     import pandas as pd
     from tqdm import tqdm
     from Bio import SeqIO
@@ -261,15 +263,19 @@ else:
         return msa
 
 
-    def label_row(row, sequence, token_probs, alphabet, offset_idx):
-        wt, idx, mt = row[0], int(row[1:-1]) - offset_idx, row[-1]
-        assert sequence[idx] == wt, "The listed wildtype does not match the provided sequence"
+    def label_row(rows, sequence, token_probs, alphabet, offset_idx):
+        rows = rows.split(":")
+        score = 0
+        for row in rows:
+            wt, idx, mt = row[0], int(row[1:-1]) - offset_idx, row[-1]
+            assert sequence[idx] == wt, "The listed wildtype does not match the provided sequence"
 
-        wt_encoded, mt_encoded = alphabet.get_idx(wt), alphabet.get_idx(mt)
+            wt_encoded, mt_encoded = alphabet.get_idx(wt), alphabet.get_idx(mt)
 
-        # add 1 for BOS
-        score = token_probs[0, 1 + idx, mt_encoded] - token_probs[0, 1 + idx, wt_encoded]
-        return score.item()
+            # add 1 for BOS
+            score_obj = token_probs[0, 1 + idx, mt_encoded] - token_probs[0, 1 + idx, wt_encoded]
+            score += score_obj.item()
+        return score / len(rows)
 
 
     def compute_pppl(row, sequence, model, alphabet, offset_idx):
@@ -400,7 +406,7 @@ else:
                     axis=1,
                 )
     # check if output path exists
-    if not os.path.exists(dms_output):
-        os.makedirs(dms_output)
+    if not os.path.exists(outdir):
+        os.makedirs(outdir)
 
-    dms_df.to_csv(dms_output)
+    dms_df.to_csv(outdir + dms_output, index=None)
