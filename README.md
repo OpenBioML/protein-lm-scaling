@@ -22,38 +22,26 @@ pip install -e protein_lm/tokenizer/rust_trie
 
 ## Training
 
-There are two options to train the APT Model
-
-At the root project directory (e.g protein_lm_scaling/), use any one of the following methods
-
-
-### Method 1
-
-
-An example file is provided in the protein_lm/dataset/uniref folder
+An example data file is provided in the `protein_lm/dataset/uniref` folder and an example toy training config yaml that uses this dataset is provided: `protein_lm/configs/train/toy_localcsv.yaml`. To use this config, at the root project directory (e.g., `protein_lm_scaling/`), run
 
 ```
-python3 protein_lm/modeling/scripts/train.py --train_file_path <path_to_file> --sequence_column <name_of_column> --max_sequence_length 1024 --epochs 10 --steps_per_epoch 2
+python protein_lm/modeling/scripts/train.py --config-file protein_lm/configs/train/toy_localcsv.yaml
 ```
-There is an also option to read from a hugging face dataset
-In this example, we are reading the [zpn/uniref50](https://huggingface.co/datasets/zpn/uniref50) dataset
+
+This config is actually the default, so the above is equivalent to
 
 ```
-python3 protein_lm/modeling/scripts/train.py --hf_dataset zpn/uniref50 --sequence_column sequence --max_sequence_length 1024 --epochs 10 --steps_per_epoch 2
+python protein_lm/modeling/scripts/train.py
+```
+
+An example config yaml of using a dataset from huggingface is `protein_lm/configs/train/toy_hf.yaml`, which you can run with
+
+```
+python protein_lm/modeling/scripts/train.py --config-file protein_lm/configs/train/toy_hf.yaml
 ```
 
 
-### Method 2
-
-```
-from protein_lm.modeling.scripts.train import train
-train(train_file_path = '', sequence_column = '', max_sequence_length = 20, epochs = 10, steps_per_epoch = 2)
-```
-OR
-
-```
-from protein_lm.modeling.scripts.train import train
-train(hf_dataset = 'zpn/uniref50', sequence_column = 'sequence', max_sequence_length = 20, epochs = 10, steps_per_epoch = 2)
-```
-
-
+## Getting involved
+Your involvement is welcome! If you are interested, you can 
+- Join the `#protein-lm-scaling` channel on the [OpenBioML discord server](https://discord.com/invite/GgDBFP8ZEt).
+- Check out our [contributing guide](docs/CONTRIBUTING.md) if you are interested in contributing to this repository.
