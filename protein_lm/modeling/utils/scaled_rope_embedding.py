@@ -45,14 +45,14 @@ class LlamaRotaryEmbedding(torch.nn.Module):
         self.register_buffer("cos_cached", emb.cos()[None, None, :, :].to(dtype), persistent=False)
         self.register_buffer("sin_cached", emb.sin()[None, None, :, :].to(dtype), persistent=False)
 
-    def forward(self, x, seq_len=None):
+    def forward(self,q, k, seq_len=None,position_ids = None):
         # x: [bs, num_attention_heads, seq_len, head_size]
         if seq_len > self.max_seq_len_cached:
-            self._set_cos_sin_cache(seq_len=seq_len, device=x.device, dtype=x.dtype)
+            self._set_cos_sin_cache(seq_len=seq_len, device=q.device, dtype=q.dtype)
 
         return (
-            self.cos_cached[:, :, :seq_len, ...].to(dtype=x.dtype),
-            self.sin_cached[:, :, :seq_len, ...].to(dtype=x.dtype),
+            apply_rotary_pos_emb(q,k,self.cos_cached[:, :, :seq_len, ...].to(dtype=q.dtype),
+            self.sin_cached[:, :, :seq_len, ...].to(dtype=q.dtype),position_ids)
         )
 
 
@@ -72,18 +72,7 @@ class LlamaLinearScalingRotaryEmbedding(LlamaRotaryEmbedding):
         # Different from paper, but it uses a different permutation in order to obtain the same calculation
         emb = torch.cat((freqs, freqs), dim=-1)
         self.register_buffer("cos_cached", emb.cos()[None, None, :, :].to(dtype), persistent=False)
-        self.register_buffer("sin_cached", emb.sin()[None, None, :, :].to(dtype), persistent=False)
-    
-    def forward(self,q, k, seq_len=None,position_ids = None):
-        # x: [bs, num_attention_heads, seq_len, head_size]
-        if seq_len > self.max_seq_len_cached:
-            self._set_cos_sin_cache(seq_len=seq_len, device=q.device, dtype=q.dtype)
-
-        return (
-            apply_rotary_pos_emb(q,k,self.cos_cached[:, :, :seq_len, ...].to(dtype=q.dtype),
-            self.sin_cached[:, :, :seq_len, ...].to(dtype=q.dtype),position_ids)
-        )
-
+        self.register_buffer("sin_cached", emb.sin()[None, None, :, :].to(dtype), persistent=False)    
 
 class LlamaDynamicNTKScalingRotaryEmbedding(LlamaRotaryEmbedding):
     """LlamaRotaryEmbedding extended with Dynamic NTK scaling. Credits to the Reddit users /u/bloc97 and /u/emozilla"""
@@ -109,13 +98,3 @@ class LlamaDynamicNTKScalingRotaryEmbedding(LlamaRotaryEmbedding):
         emb = torch.cat((freqs, freqs), dim=-1)
         self.register_buffer("cos_cached", emb.cos()[None, None, :, :].to(dtype), persistent=False)
         self.register_buffer("sin_cached", emb.sin()[None, None, :, :].to(dtype), persistent=False)
-    
-    def forward(self,q, k, seq_len=None,position_ids = None):
-        # x: [bs, num_attention_heads, seq_len, head_size]
-        if seq_len > self.max_seq_len_cached:
-            self._set_cos_sin_cache(seq_len=seq_len, device=q.device, dtype=q.dtype)
-
-        return (
-            apply_rotary_pos_emb(q,k,self.cos_cached[:, :, :seq_len, ...].to(dtype=q.dtype),
-            self.sin_cached[:, :, :seq_len, ...].to(dtype=q.dtype),position_ids)
-        )

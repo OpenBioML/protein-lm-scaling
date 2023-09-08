@@ -367,7 +367,7 @@ class APTModel(GPT2PreTrainedModel):
             alibi = create_alibi_tensor(attn_heads,maxpos)
             self.register_buffer('alibi',alibi)
         else:
-            raise Exception(f'position_embedding {self.position_embedding} not supported. Please select one of learned,rope,rerope or alibi')
+            raise Exception(f'position_embedding {self.position_embedding} not supported. Please select one of learned, rope, rerope, linear rope, dynamic rope or alibi')
         
         self.drop = nn.Dropout(config.embd_pdrop)
         self.h = nn.ModuleList([APTBlock(config, layer_idx=i) for i in range(config.num_hidden_layers)])
