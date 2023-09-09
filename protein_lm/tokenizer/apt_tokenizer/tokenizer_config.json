@@ -1,0 +1,10 @@
+{
+  "clean_up_tokenization_spaces": true,
+  "cls_token": "<cls>",
+  "eos_token": "<eos>",
+  "mask_token": "<mask>",
+  "model_max_length": 1000000000000000019884624838656,
+  "pad_token": "<pad>",
+  "tokenizer_class": "PreTrainedTokenizerFast",
+  "unk_token": "<unk>"
+}
