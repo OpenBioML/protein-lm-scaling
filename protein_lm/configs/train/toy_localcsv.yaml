@@ -9,8 +9,8 @@ dataset:
   sequence_column_name: "sequence"
   max_sequence_length: 10
 
-# corresponds to TrainingArgsConfig
-training_args:
+# corresponds to HuggingFace's TrainingArguments
+training_arguments:
   output_dir: "checkpoints/toy"
   max_steps: 1
   num_train_epochs: 1

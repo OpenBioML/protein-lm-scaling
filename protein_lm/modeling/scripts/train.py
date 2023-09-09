@@ -10,6 +10,7 @@ from protein_lm.modeling.getters.dataset import get_dataset
 from protein_lm.modeling.getters.model import get_model
 from protein_lm.modeling.getters.tokenizer import get_tokenizer
 from protein_lm.modeling.getters.training_args import get_training_args
+from protein_lm.modeling.getters.wandb_log import setup_wandb
 
 
 def train(
@@ -39,8 +40,11 @@ def train(
     )
 
     training_args = get_training_args(
-        config_dict=config_dict["training_args"],
+        config_dict=config_dict["training_arguments"],
     )
+
+    if "wandb" in training_args.report_to:
+        setup_wandb(config_dict)
 
     trainer = Trainer(
         model=model,

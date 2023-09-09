@@ -9,20 +9,26 @@ dataset:
   sequence_column_name: "sequence"
   max_sequence_length: 10
 
-# corresponds to TrainingArgsConfig
-training_args:
-  output_dir: "checkpoints/toy"
-  max_steps: 1
-  num_train_epochs: 1
+# corresponds to HuggingFace's TrainingArguments
+training_arguments:
+  output_dir: "checkpoints/toy_hf"
+  num_train_epochs: 2
   learning_rate: 0.1
   weight_decay: 0.1
   save_strategy: "epoch"
-  per_device_train_batch_size: 1
-  save_steps: 1
-  report_to: "none"
+  per_device_train_batch_size: 10
+  save_steps: 5
+  evaluation_strategy: "steps"
+  eval_steps: 5
+  report_to: "wandb"
   label_names:
     - 'labels'
   no_cuda: false
+
+# corresponds to WandBConfig
+wandb:
+  name: "toy_hf"
+  dir: "wandb_files/"
 
 # corresponds to TokenizerConfig
 tokenizer:
