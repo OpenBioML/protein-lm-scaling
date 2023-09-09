@@ -2,7 +2,10 @@
 dataset:
   dataset_type: "huggingface"
   dataset_loc: "zpn/uniref50"
-  train_sample_size: 100
+  subsample_size: 1000
+  split_seed: 2
+  val_size: 10
+  test_size: 10
   sequence_column_name: "sequence"
   max_sequence_length: 10
 

@@ -1,6 +1,7 @@
 import argparse
 import math
 
+
 import yaml
 from transformers import Trainer
 
@@ -23,7 +24,7 @@ def train(
 
     tokenizer = get_tokenizer(config_dict=config_dict["tokenizer"])
 
-    train_ds = get_dataset(
+    dataset = get_dataset(
         config_dict=config_dict["dataset"],
         tokenizer=tokenizer,
     )
@@ -44,7 +45,8 @@ def train(
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=train_ds,
+        train_dataset=dataset["train"],
+        eval_dataset=dataset.get("val", None),
         data_collator=data_collator,
     )
 

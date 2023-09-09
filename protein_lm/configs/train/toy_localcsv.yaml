@@ -2,7 +2,10 @@
 dataset:
   dataset_type: "csv"
   dataset_loc: "protein_lm/dataset/uniref/uniref50_trimmed.csv"
-  train_sample_size: 100
+  subsample_size: 100
+  split_seed: 2
+  val_size: 10
+  test_size: 10
   sequence_column_name: "sequence"
   max_sequence_length: 10
 
