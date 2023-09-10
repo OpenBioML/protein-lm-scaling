@@ -44,7 +44,9 @@ def train(
     )
 
     if "wandb" in training_args.report_to:
-        setup_wandb(config_dict)
+        setup_wandb(
+            config_dict["wandb"],
+        )
 
     trainer = Trainer(
         model=model,

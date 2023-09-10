@@ -11,18 +11,13 @@ class WandBConfig(BaseModel):
     dir: Optional[str] = None
 
 
-def setup_wandb(full_config_dict: Dict) -> None:
-    """
-    Sets up logging via wieghts and biases
-    Args:
-        full_config_dict: contains the full config, not just
-    the part corresponding to wandb, so that it can be logged
-    """
-    assert "wandb" in full_config_dict, f"If using wandb, need wandb section in config"
-    wandb_config = WandBConfig(**full_config_dict["wandb"])
-    if wandb_config.dir is not None:
-        if not os.path.isdir(wandb_config.dir):
-            print(f"creating wandb directory at {wandb_config.dir}")
-            os.makedirs(wandb_config.dir)
+def setup_wandb(config_dict: Dict) -> None:
+    config = WandBConfig(**config_dict)
+    if config.dir is not None:
+        if not os.path.isdir(config.dir):
+            print(f"creating wandb directory at {config.dir}")
+            os.makedirs(config.dir)
 
-    wandb.init(**dict(wandb_config), config=full_config_dict)
+    os.environ["WANDB_PROJECT"] = config.project
+    os.environ["WANDB_NAME"] = config.name
+    os.environ["WANDB_DIR"] = config.dir
