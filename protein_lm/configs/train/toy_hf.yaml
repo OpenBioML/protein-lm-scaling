@@ -24,6 +24,7 @@ training_arguments:
   label_names:
     - 'labels'
   no_cuda: false
+  ddp_find_unused_parameters: false
 
 # corresponds to WandBConfig
 wandb:
