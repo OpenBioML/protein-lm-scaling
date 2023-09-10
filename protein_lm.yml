@@ -10,7 +10,9 @@ dependencies:
   - pytorch
   - pydantic>=2.0
   - wandb
+  - rust
   - pip:
       - transformers
       - datasets
       - accelerate
+      - pytest
