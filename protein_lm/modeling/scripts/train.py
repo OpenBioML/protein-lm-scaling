@@ -56,17 +56,8 @@ def train(
         data_collator=data_collator,
     )
 
-    train_result = trainer.train()
-    trainer.save_model()  # Saves the tokenizer too for easy upload
-    metrics = train_result.metrics
-    try:
-        perplexity = math.exp(metrics["train_loss"])
-    except OverflowError:
-        perplexity = float("inf")
-    metrics["perplexity"] = perplexity
-    print("metrics:", metrics)
-    trainer.log_metrics("train", metrics)
-    trainer.save_metrics("train", metrics)
+    trainer.train()
+    trainer.save_model()
     trainer.save_state()
 
 
