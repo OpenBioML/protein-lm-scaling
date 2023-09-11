@@ -66,14 +66,16 @@ supervised=False
 nogpu = False
 # scoring strategy for zero shot"
 # choose out of: ["wt-marginals", "masked-marginals", "pseudo-ppl"]
-scoring_strategy = 'wt-marginals'
+scoring_strategy = 'pseudo-ppl'
 # column that holds info on mutations
 mutation_col = 0
 # offset index, default was zero, but in our case it needs to be one
 offset_idx = 1
 # relative output path 
-outdir = "protein_lm/evaluation/output/"
-dms_output =  "scores_{}.csv".format(scoring_strategy)
+outdir = "protein_lm/evaluation/output/{}/".format(scoring_strategy)
+# check if output path exists
+if not os.path.exists(outdir):
+    os.makedirs(outdir)
 # %%
 # download substitutions, unzip, save to disk
 dat_url = "https://marks.hms.harvard.edu/proteingym/ProteinGym_substitutions.zip"
@@ -278,32 +280,37 @@ else:
         return score / len(rows)
 
 
-    def compute_pppl(row, sequence, model, alphabet, offset_idx):
-        wt, idx, mt = row[0], int(row[1:-1]) - offset_idx, row[-1]
-        assert sequence[idx] == wt, "The listed wildtype does not match the provided sequence"
+    def compute_pppl(mutated_sequence, model, alphabet):
+        """
+        The original methods changes the given base_sequence to the mutated one, we'll just read it from the df.
+        We compute the pseudo-Perplexity of the complete mutated sequence. 
+        The code to achieve this has not been changes from esm's repo
+        """
+        # wt, idx, mt = row[0], int(row[1:-1]) - offset_idx, row[-1]
+        # assert sequence[idx] == wt, "The listed wildtype does not match the provided sequence"
 
-        # modify the sequence
-        sequence = sequence[:idx] + mt + sequence[(idx + 1) :]
+        # # modify the sequence
+        # sequence = sequence[:idx] + mt + sequence[(idx + 1) :]
 
         # encode the sequence
         data = [
-            ("protein1", sequence),
+            ("protein1", mutated_sequence),
         ]
 
         batch_converter = alphabet.get_batch_converter()
 
         batch_labels, batch_strs, batch_tokens = batch_converter(data)
 
-        wt_encoded, mt_encoded = alphabet.get_idx(wt), alphabet.get_idx(mt)
+        # wt_encoded, mt_encoded = alphabet.get_idx(wt), alphabet.get_idx(mt)
 
-        # compute probabilities at each position
+        # compute token probabilities at each position
         log_probs = []
-        for i in range(1, len(sequence) - 1):
+        for i in range(1, len(mutated_sequence) - 1):
             batch_tokens_masked = batch_tokens.clone()
             batch_tokens_masked[0, i] = alphabet.mask_idx
             with torch.no_grad():
                 token_probs = torch.log_softmax(model(batch_tokens_masked.cuda())["logits"], dim=-1)
-            log_probs.append(token_probs[0, i, alphabet.get_idx(sequence[i])].item())  # vocab size
+            log_probs.append(token_probs[0, i, alphabet.get_idx(mutated_sequence[i])].item())  # vocab size
         return sum(log_probs)
     
     # get experiments and base seqs
@@ -317,7 +324,8 @@ else:
         # Load the deep mutational scan
         dms_df_path = path + "ProteinGym_substitutions/" + file_name
         dms_df = pd.read_csv(dms_df_path)
-        
+        dms_output =  "scores_{}".format(file_name)
+
         # inference for each model
         # set checkpoint to be mnodel location for now
         model_location = checkpoint.split("/")[-1]
@@ -350,7 +358,7 @@ else:
             #         )
             #     all_token_probs.append(token_probs[:, 0, i])  # vocab size
             # token_probs = torch.cat(all_token_probs, dim=0).unsqueeze(0)
-            # dms_df[model_location + "_" + experiment] = dms_df.apply(
+            # dms_df[model_location] = dms_df.apply(
             #     lambda row: label_row(
             #         row[mutation_col], sequence, token_probs, alphabet, offset_idx
             #     ),
@@ -366,7 +374,7 @@ else:
             if scoring_strategy == "wt-marginals":
                 with torch.no_grad():
                     token_probs = torch.log_softmax(model(batch_tokens.cuda())["logits"], dim=-1)
-                dms_df[model_location + "_" + experiment] = dms_df.apply(
+                dms_df[model_location] = dms_df.apply(
                     lambda row: label_row(
                         row[mutation_col],
                         sequence,
@@ -387,7 +395,7 @@ else:
                         )
                     all_token_probs.append(token_probs[:, i])  # vocab size
                 token_probs = torch.cat(all_token_probs, dim=0).unsqueeze(0)
-                dms_df[model_location + "_" + experiment] = dms_df.apply(
+                dms_df[model_location] = dms_df.apply(
                     lambda row: label_row(
                         row[mutation_col],
                         sequence,
@@ -399,14 +407,16 @@ else:
                 )
             elif scoring_strategy == "pseudo-ppl":
                 tqdm.pandas()
-                dms_df[model_location + "_" + experiment] = dms_df.progress_apply(
+                dms_df[model_location] = dms_df.progress_apply(
                     lambda row: compute_pppl(
-                        row[mutation_col], sequence, model, alphabet, offset_idx
+                        #row[mutation_col],
+                        # sequence,
+                        row["mutated_sequence"],
+                        model,
+                        alphabet
+                        #offset_idx
                     ),
                     axis=1,
                 )
-    # check if output path exists
-    if not os.path.exists(outdir):
-        os.makedirs(outdir)
-
-    dms_df.to_csv(outdir + dms_output, index=None)
+        # save experiment
+        dms_df.to_csv(outdir + dms_output, index=None)

@@ -14,4 +14,6 @@ dependencies:
       - transformers
       - datasets
       - accelerate
+      - evaluate
       - pytest
+      - fair-esm
