@@ -57,13 +57,18 @@ import pandas as pd
 # http requests
 import requests, zipfile, io, os
 #####################################################################
-# SOME VARIABLES    
-# relative protgym path
-path = "protein_lm/dataset/ProteinGym/"
+# SOME VARIABLES
 # run supervised benchmark
 supervised=False
 # run zero shot benchmark without gpu
 nogpu = False
+# run AUTOREG
+AUTOREG = True
+# as baseline use facebook/esm2_t33_650M_UR50D
+# other wise use checkpoint path i.e.: checkpoints/toy
+checkpoint = "checkpoints/toy"
+# relative protgym path
+path = "protein_lm/dataset/ProteinGym/"
 # scoring strategy for zero shot"
 # choose out of: ["wt-marginals", "masked-marginals", "pseudo-ppl"]
 scoring_strategy = 'pseudo-ppl'
@@ -76,6 +81,7 @@ outdir = "protein_lm/evaluation/output/{}/".format(scoring_strategy)
 # check if output path exists
 if not os.path.exists(outdir):
     os.makedirs(outdir)
+#####################################################################
 # %%
 # download substitutions, unzip, save to disk
 dat_url = "https://marks.hms.harvard.edu/proteingym/ProteinGym_substitutions.zip"
@@ -150,46 +156,46 @@ else:
     dataset = load_dataset("csv", data_files=(path + "ProteinGym_substitutions.csv"))
     del merged_data
 
-# %% tokenize, with esm2_t33_650M_UR50D, use same checkpoint for model
-checkpoint = "facebook/esm2_t33_650M_UR50D"
-# autoTokenizer = AutoTokenizer.from_pretrained(checkpoint)
-tokenizer = AptTokenizer()
-
-def tokenize(batch):
-    tokens = tokenizer(batch["mutated_sequence"], return_tensors=True, max_sequence_length=760)
-    return {"input_ids": tokens}
-
-token_data = dataset.map(tokenize, batched=True)
-data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
-
-# rename and remove stuff to fit into dataloader seemlessly
-# removes info we don't use in the network, as we only use tokens and binned scores
-token_data = token_data.remove_columns(["DMS_score", "mutant", "mutated_sequence"])
-# binned scores are renamed to 'labels'
-token_data = token_data.rename_column("DMS_score_bin", "labels")
-
-# Split the train dataset into train, valid, and test subsets
-dict_train_test = token_data['train'].train_test_split(test_size=0.4, shuffle=True)
-train_dataset = dict_train_test['train']
-test_dataset = dict_train_test['test']
-
-# subset for testruns:
-# train_dataset = train_dataset.select([x for x in range(200)])
-# test_dataset = test_dataset.select([x for x in range(100)])
-
-# # here we could split into validation and test if needed
-# dict_test_valid = test_dataset.train_test_split(test_size=0.5, shuffle=True)
-# test_dataset = dict_test_valid['test']
-# valid_dataset = dict_test_valid['train']
 # %%  taken from facebooks pretrained-finetuning notebook here: 
 # https://colab.research.google.com/github/huggingface/notebooks/blob/main/examples/protein_language_modeling.ipynb#scrollTo=fc164b49
+
 if supervised:
     # load model for seq classification
     num_labels = 2
     model = AutoModelForSequenceClassification.from_pretrained(checkpoint, num_labels=num_labels)
+    model.config.pad_token_id = 2     # needed for apt as long as tokenizer is not API compatible :)
 
     model_name = checkpoint.split("/")[-1]
     batch_size = 8
+
+    tokenizer = AptTokenizer()
+
+    def tokenize(batch):
+        tokens = tokenizer(batch["mutated_sequence"], return_tensors=True, max_sequence_length=760)
+        return {"input_ids": tokens}
+
+    token_data = dataset.map(tokenize, batched=True)
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+
+    # rename and remove stuff to fit into dataloader seemlessly
+    # removes info we don't use in the network, as we only use tokens and binned scores
+    token_data = token_data.remove_columns(["DMS_score", "mutant", "mutated_sequence"])
+    # binned scores are renamed to 'labels'
+    token_data = token_data.rename_column("DMS_score_bin", "labels")
+
+    # Split the train dataset into train, valid, and test subsets
+    dict_train_test = token_data['train'].train_test_split(test_size=0.4, shuffle=True)
+    train_dataset = dict_train_test['train']
+    test_dataset = dict_train_test['test']
+
+    # subset for testruns:
+    # train_dataset = train_dataset.select([x for x in range(200)])
+    # test_dataset = test_dataset.select([x for x in range(100)])
+
+    # # here we could split into validation and test if needed
+    # dict_test_valid = test_dataset.train_test_split(test_size=0.5, shuffle=True)
+    # test_dataset = dict_test_valid['test']
+    # valid_dataset = dict_test_valid['train']
 
     args = TrainingArguments(
         f"{model_name}-finetuned-localization",
@@ -221,112 +227,112 @@ if supervised:
         compute_metrics=compute_metrics,
     )
     # run trainer, this will return eval loass andd accuracy every few steps
-    # and save this to the disk in the esm2* folder
+    # and save this to the disk in the model-ceckpoint* folder
     trainer.train()
 else:
-    # here we'll add a zero-shot eval script like this: 
-    # https://github.com/facebookresearch/esm/blob/main/examples/variant-prediction/predict.py
+    if AUTOREG:
+        # zero shot for autoregressive models, as fopund in RITA
+        # https://github.com/lightonai/RITA/blob/master/compute_fitness.py
+        from transformers import AutoModelForCausalLM
+        model = AutoModelForCausalLM.from_pretrained(checkpoint)
+
+    else: 
+        # here we'll add a zero-shot eval script like this: 
+        # https://github.com/facebookresearch/esm/blob/main/examples/variant-prediction/predict.py
+            
+        import torch
+
+        # from protein_lm.modeling.models.fair_esm.data import Alphabet, FastaBatchedDataset
+        # from protein_lm.modeling.models.fair_esm import pretrained
+        # from protein_lm.modeling.models.fair_esm.model.msa_transformer import MSATransformer
+        from esm import pretrained, Alphabet, FastaBatchedDataset, MSATransformer
+        import pandas as pd
+        from tqdm import tqdm
+        from Bio import SeqIO
+        import itertools
+        from typing import List, Tuple
+        import numpy as np
+
+
+        def remove_insertions(sequence: str) -> str:
+            """ Removes any insertions into the sequence. Needed to load aligned sequences in an MSA. """
+            # This is an efficient way to delete lowercase characters and insertion characters from a string
+            deletekeys = dict.fromkeys(string.ascii_lowercase)
+            deletekeys["."] = None
+            deletekeys["*"] = None
+
+            translation = str.maketrans(deletekeys)
+            return sequence.translate(translation)
+
+
+        def read_msa(filename: str, nseq: int) -> List[Tuple[str, str]]:
+            """ Reads the first nseq sequences from an MSA file, automatically removes insertions.
+            
+            The input file must be in a3m format (although we use the SeqIO fasta parser)
+            for remove_insertions to work properly."""
+
+            msa = [
+                (record.description, remove_insertions(str(record.seq)))
+                for record in itertools.islice(SeqIO.parse(filename, "fasta"), nseq)
+            ]
+            return msa
+
+
+        def label_row(rows, sequence, token_probs, alphabet, offset_idx):
+            rows = rows.split(":")
+            score = 0
+            for row in rows:
+                wt, idx, mt = row[0], int(row[1:-1]) - offset_idx, row[-1]
+                assert sequence[idx] == wt, "The listed wildtype does not match the provided sequence"
+
+                wt_encoded, mt_encoded = alphabet.get_idx(wt), alphabet.get_idx(mt)
+
+                # add 1 for BOS
+                score_obj = token_probs[0, 1 + idx, mt_encoded] - token_probs[0, 1 + idx, wt_encoded]
+                score += score_obj.item()
+            return score / len(rows)
+
+
+        def compute_pppl(mutated_sequence, model, alphabet):
+            """
+            The original methods changes the given base_sequence to the mutated one, we'll just read it from the df.
+            We compute the pseudo-Perplexity of the complete mutated sequence. 
+            The code to achieve this has not been changes from esm's repo
+            """
+            # wt, idx, mt = row[0], int(row[1:-1]) - offset_idx, row[-1]
+            # assert sequence[idx] == wt, "The listed wildtype does not match the provided sequence"
+
+            # # modify the sequence
+            # sequence = sequence[:idx] + mt + sequence[(idx + 1) :]
+
+            # encode the sequence
+            data = [
+                ("protein1", mutated_sequence),
+            ]
+
+            batch_converter = alphabet.get_batch_converter()
+
+            batch_labels, batch_strs, batch_tokens = batch_converter(data)
+
+            # wt_encoded, mt_encoded = alphabet.get_idx(wt), alphabet.get_idx(mt)
+
+            # compute token probabilities at each position
+            log_probs = []
+            for i in range(1, len(mutated_sequence) - 1):
+                batch_tokens_masked = batch_tokens.clone()
+                batch_tokens_masked[0, i] = alphabet.mask_idx
+                with torch.no_grad():
+                    token_probs = torch.log_softmax(model(batch_tokens_masked.cuda())["logits"], dim=-1)
+                log_probs.append(token_probs[0, i, alphabet.get_idx(mutated_sequence[i])].item())  # vocab size
+            return sum(log_probs)
         
-    import torch
+        # get experiments and base seqs
+        ref_df = pd.read_csv(path + "ProteinGym_reference_file_substitutions.csv")
+        dms_ids = ref_df.DMS_id
+        dms_file = ref_df.DMS_filename
+        dms_ref_seqs = ref_df.target_seq
 
-    # from protein_lm.modeling.models.fair_esm.data import Alphabet, FastaBatchedDataset
-    # from protein_lm.modeling.models.fair_esm import pretrained
-    # from protein_lm.modeling.models.fair_esm.model.msa_transformer import MSATransformer
-    from esm import pretrained, Alphabet, FastaBatchedDataset, MSATransformer
-    import pandas as pd
-    from tqdm import tqdm
-    from Bio import SeqIO
-    import itertools
-    from typing import List, Tuple
-    import numpy as np
-
-
-    def remove_insertions(sequence: str) -> str:
-        """ Removes any insertions into the sequence. Needed to load aligned sequences in an MSA. """
-        # This is an efficient way to delete lowercase characters and insertion characters from a string
-        deletekeys = dict.fromkeys(string.ascii_lowercase)
-        deletekeys["."] = None
-        deletekeys["*"] = None
-
-        translation = str.maketrans(deletekeys)
-        return sequence.translate(translation)
-
-
-    def read_msa(filename: str, nseq: int) -> List[Tuple[str, str]]:
-        """ Reads the first nseq sequences from an MSA file, automatically removes insertions.
-        
-        The input file must be in a3m format (although we use the SeqIO fasta parser)
-        for remove_insertions to work properly."""
-
-        msa = [
-            (record.description, remove_insertions(str(record.seq)))
-            for record in itertools.islice(SeqIO.parse(filename, "fasta"), nseq)
-        ]
-        return msa
-
-
-    def label_row(rows, sequence, token_probs, alphabet, offset_idx):
-        rows = rows.split(":")
-        score = 0
-        for row in rows:
-            wt, idx, mt = row[0], int(row[1:-1]) - offset_idx, row[-1]
-            assert sequence[idx] == wt, "The listed wildtype does not match the provided sequence"
-
-            wt_encoded, mt_encoded = alphabet.get_idx(wt), alphabet.get_idx(mt)
-
-            # add 1 for BOS
-            score_obj = token_probs[0, 1 + idx, mt_encoded] - token_probs[0, 1 + idx, wt_encoded]
-            score += score_obj.item()
-        return score / len(rows)
-
-
-    def compute_pppl(mutated_sequence, model, alphabet):
-        """
-        The original methods changes the given base_sequence to the mutated one, we'll just read it from the df.
-        We compute the pseudo-Perplexity of the complete mutated sequence. 
-        The code to achieve this has not been changes from esm's repo
-        """
-        # wt, idx, mt = row[0], int(row[1:-1]) - offset_idx, row[-1]
-        # assert sequence[idx] == wt, "The listed wildtype does not match the provided sequence"
-
-        # # modify the sequence
-        # sequence = sequence[:idx] + mt + sequence[(idx + 1) :]
-
-        # encode the sequence
-        data = [
-            ("protein1", mutated_sequence),
-        ]
-
-        batch_converter = alphabet.get_batch_converter()
-
-        batch_labels, batch_strs, batch_tokens = batch_converter(data)
-
-        # wt_encoded, mt_encoded = alphabet.get_idx(wt), alphabet.get_idx(mt)
-
-        # compute token probabilities at each position
-        log_probs = []
-        for i in range(1, len(mutated_sequence) - 1):
-            batch_tokens_masked = batch_tokens.clone()
-            batch_tokens_masked[0, i] = alphabet.mask_idx
-            with torch.no_grad():
-                token_probs = torch.log_softmax(model(batch_tokens_masked.cuda())["logits"], dim=-1)
-            log_probs.append(token_probs[0, i, alphabet.get_idx(mutated_sequence[i])].item())  # vocab size
-        return sum(log_probs)
-    
-    # get experiments and base seqs
-    ref_df = pd.read_csv(path + "ProteinGym_reference_file_substitutions.csv")
-    dms_ids = ref_df.DMS_id
-    dms_file = ref_df.DMS_filename
-    dms_ref_seqs = ref_df.target_seq
-
-    for experiment, file_name, sequence in zip(dms_ids, dms_file, dms_ref_seqs):
-
-        # Load the deep mutational scan
-        dms_df_path = path + "ProteinGym_substitutions/" + file_name
-        dms_df = pd.read_csv(dms_df_path)
-        dms_output =  "scores_{}".format(file_name)
-
-        # inference for each model
+        # inference for given model
         # set checkpoint to be mnodel location for now
         model_location = checkpoint.split("/")[-1]
 
@@ -336,87 +342,95 @@ else:
             model = model.cuda()
             print("Transferred model to GPU")
 
-        batch_converter = alphabet.get_batch_converter()
+        for experiment, file_name, sequence in zip(dms_ids, dms_file, dms_ref_seqs):
 
-        if isinstance(model, MSATransformer):
-            # as far as I know we do not plan on using this? I kept it around for now.
-            pass
-            # data = [read_msa(args.msa_path, args.msa_samples)]
-            # assert (
-            #     scoring_strategy == "masked-marginals"
-            # ), "MSA Transformer only supports masked marginal strategy"
+            # Load the deep mutational scan
+            dms_df_path = path + "ProteinGym_substitutions/" + file_name
+            dms_df = pd.read_csv(dms_df_path)
+            dms_output =  "scores_{}".format(file_name)
 
-            # batch_labels, batch_strs, batch_tokens = batch_converter(data)
 
-            # all_token_probs = []
-            # for i in tqdm(range(batch_tokens.size(2))):
-            #     batch_tokens_masked = batch_tokens.clone()
-            #     batch_tokens_masked[0, 0, i] = alphabet.mask_idx  # mask out first sequence
-            #     with torch.no_grad():
-            #         token_probs = torch.log_softmax(
-            #             model(batch_tokens_masked.cuda())["logits"], dim=-1
-            #         )
-            #     all_token_probs.append(token_probs[:, 0, i])  # vocab size
-            # token_probs = torch.cat(all_token_probs, dim=0).unsqueeze(0)
-            # dms_df[model_location] = dms_df.apply(
-            #     lambda row: label_row(
-            #         row[mutation_col], sequence, token_probs, alphabet, offset_idx
-            #     ),
-            #     axis=1,
-            # )
+            batch_converter = alphabet.get_batch_converter()
 
-        else:
-            data = [
-                ("protein1", sequence),
-            ]
-            batch_labels, batch_strs, batch_tokens = batch_converter(data)
+            if isinstance(model, MSATransformer):
+                # as far as I know we do not plan on using this? I kept it around for now.
+                pass
+                # data = [read_msa(args.msa_path, args.msa_samples)]
+                # assert (
+                #     scoring_strategy == "masked-marginals"
+                # ), "MSA Transformer only supports masked marginal strategy"
 
-            if scoring_strategy == "wt-marginals":
-                with torch.no_grad():
-                    token_probs = torch.log_softmax(model(batch_tokens.cuda())["logits"], dim=-1)
-                dms_df[model_location] = dms_df.apply(
-                    lambda row: label_row(
-                        row[mutation_col],
-                        sequence,
-                        token_probs,
-                        alphabet,
-                        offset_idx,
-                    ),
-                    axis=1,
-                )
-            elif scoring_strategy == "masked-marginals":
-                all_token_probs = []
-                for i in tqdm(range(batch_tokens.size(1))):
-                    batch_tokens_masked = batch_tokens.clone()
-                    batch_tokens_masked[0, i] = alphabet.mask_idx
+                # batch_labels, batch_strs, batch_tokens = batch_converter(data)
+
+                # all_token_probs = []
+                # for i in tqdm(range(batch_tokens.size(2))):
+                #     batch_tokens_masked = batch_tokens.clone()
+                #     batch_tokens_masked[0, 0, i] = alphabet.mask_idx  # mask out first sequence
+                #     with torch.no_grad():
+                #         token_probs = torch.log_softmax(
+                #             model(batch_tokens_masked.cuda())["logits"], dim=-1
+                #         )
+                #     all_token_probs.append(token_probs[:, 0, i])  # vocab size
+                # token_probs = torch.cat(all_token_probs, dim=0).unsqueeze(0)
+                # dms_df[model_location] = dms_df.apply(
+                #     lambda row: label_row(
+                #         row[mutation_col], sequence, token_probs, alphabet, offset_idx
+                #     ),
+                #     axis=1,
+                # )
+
+            else:
+                data = [
+                    ("protein1", sequence),
+                ]
+                batch_labels, batch_strs, batch_tokens = batch_converter(data)
+
+                if scoring_strategy == "wt-marginals":
                     with torch.no_grad():
-                        token_probs = torch.log_softmax(
-                            model(batch_tokens_masked.cuda())["logits"], dim=-1
-                        )
-                    all_token_probs.append(token_probs[:, i])  # vocab size
-                token_probs = torch.cat(all_token_probs, dim=0).unsqueeze(0)
-                dms_df[model_location] = dms_df.apply(
-                    lambda row: label_row(
-                        row[mutation_col],
-                        sequence,
-                        token_probs,
-                        alphabet,
-                        offset_idx,
-                    ),
-                    axis=1,
-                )
-            elif scoring_strategy == "pseudo-ppl":
-                tqdm.pandas()
-                dms_df[model_location] = dms_df.progress_apply(
-                    lambda row: compute_pppl(
-                        #row[mutation_col],
-                        # sequence,
-                        row["mutated_sequence"],
-                        model,
-                        alphabet
-                        #offset_idx
-                    ),
-                    axis=1,
-                )
-        # save experiment
-        dms_df.to_csv(outdir + dms_output, index=None)
+                        token_probs = torch.log_softmax(model(batch_tokens.cuda())["logits"], dim=-1)
+                    dms_df[model_location] = dms_df.apply(
+                        lambda row: label_row(
+                            row[mutation_col],
+                            sequence,
+                            token_probs,
+                            alphabet,
+                            offset_idx,
+                        ),
+                        axis=1,
+                    )
+                elif scoring_strategy == "masked-marginals":
+                    all_token_probs = []
+                    for i in tqdm(range(batch_tokens.size(1))):
+                        batch_tokens_masked = batch_tokens.clone()
+                        batch_tokens_masked[0, i] = alphabet.mask_idx
+                        with torch.no_grad():
+                            token_probs = torch.log_softmax(
+                                model(batch_tokens_masked.cuda())["logits"], dim=-1
+                            )
+                        all_token_probs.append(token_probs[:, i])  # vocab size
+                    token_probs = torch.cat(all_token_probs, dim=0).unsqueeze(0)
+                    dms_df[model_location] = dms_df.apply(
+                        lambda row: label_row(
+                            row[mutation_col],
+                            sequence,
+                            token_probs,
+                            alphabet,
+                            offset_idx,
+                        ),
+                        axis=1,
+                    )
+                elif scoring_strategy == "pseudo-ppl":
+                    tqdm.pandas()
+                    dms_df[model_location] = dms_df.progress_apply(
+                        lambda row: compute_pppl(
+                            #row[mutation_col],
+                            # sequence,
+                            row["mutated_sequence"],
+                            model,
+                            alphabet
+                            #offset_idx
+                        ),
+                        axis=1,
+                    )
+            # save experiment
+            dms_df.to_csv(outdir + dms_output, index=None)
