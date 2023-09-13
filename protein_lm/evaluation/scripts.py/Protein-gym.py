@@ -66,11 +66,10 @@ import requests, zipfile, io, os
 supervised = False
 # run zero shot benchmark without gpu
 nogpu = False
-# run AUTOREG
-AUTOREG = True
-# as baseline use facebook/esm2_t33_650M_UR50D
+# run AUTOREG and model
+#  as baseline use facebook/esm2_t33_650M_UR50D
 # other wise use checkpoint path i.e.: checkpoints/toy
-checkpoint = "checkpoints/toy"
+AUTOREG, checkpoint = True, "checkpoints/toy"
 # relative protgym path
 path = "protein_lm/dataset/ProteinGym/"
 # scoring strategy for zero shot of ESM baseline
