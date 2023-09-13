@@ -7,7 +7,7 @@
 # Tokenization is done and then the esm 630M Model is used to be finetuned on ProteinGyms data
 # ATM only substitution data is implemented for the finetunning but both are preprocessed and the
 # complete datasets saved as CSV.
-# finetuning is done with the evaluaten libray, which we'll likely change to an own trainling loop
+# finetuning is done with the evaluaten libray, which we"ll likely change to an own trainling loop
 # to be more flexible with our own models.  
 ######################################################################################################
 # %%
@@ -49,17 +49,21 @@ from evaluate import load
 
 from protein_lm.tokenizer import EsmTokenizer, AptTokenizer
 
+import torch
+from tqdm import tqdm
+
 # others
 # import matplotlib.pyplot as plt
 from datetime import datetime
 import numpy as np
 import pandas as pd
+from scipy.stats import spearmanr
 # http requests
 import requests, zipfile, io, os
 #####################################################################
 # SOME VARIABLES
 # run supervised benchmark
-supervised=False
+supervised = False
 # run zero shot benchmark without gpu
 nogpu = False
 # run AUTOREG
@@ -69,18 +73,14 @@ AUTOREG = True
 checkpoint = "checkpoints/toy"
 # relative protgym path
 path = "protein_lm/dataset/ProteinGym/"
-# scoring strategy for zero shot"
+# scoring strategy for zero shot of ESM baseline
 # choose out of: ["wt-marginals", "masked-marginals", "pseudo-ppl"]
-scoring_strategy = 'pseudo-ppl'
+scoring_strategy = "masked-marginals"
 # column that holds info on mutations
 mutation_col = 0
 # offset index, default was zero, but in our case it needs to be one
 offset_idx = 1
-# relative output path 
-outdir = "protein_lm/evaluation/output/{}/".format(scoring_strategy)
-# check if output path exists
-if not os.path.exists(outdir):
-    os.makedirs(outdir)
+
 #####################################################################
 # %%
 # download substitutions, unzip, save to disk
@@ -134,7 +134,7 @@ else:
     folder_path = "data/ProteinGym/ProteinGym_substitutions"
     all_data = []
     for filename in os.listdir(folder_path):
-        if filename.endswith('.csv'):
+        if filename.endswith(".csv"):
             file_path = os.path.join(folder_path, filename)
             df = pd.read_csv(file_path)
             experiment = filename[:-4]
@@ -147,10 +147,10 @@ else:
     # get dataframe
     merged_data = pd.concat(all_data, ignore_index=True)
     # save the baseseqs
-    # Add spaces between each amino acid in the 'mutated_sequences' column
-    # merged_data['mutated_sequence'] = merged_data['mutated_sequence'].apply(lambda seq: ' '.join(list(seq)))
+    # Add spaces between each amino acid in the "mutated_sequences" column
+    # merged_data["mutated_sequence"] = merged_data["mutated_sequence"].apply(lambda seq: " ".join(list(seq)))
     # add cls and end tokens
-    merged_data['mutated_sequence'] = "<cls>" + merged_data['mutated_sequence'] + "<eos>"
+    merged_data["mutated_sequence"] = "<cls>" + merged_data["mutated_sequence"] + "<eos>"
     # save csv
     merged_data.to_csv(path + "ProteinGym_substitutions.csv", index=False)
     dataset = load_dataset("csv", data_files=(path + "ProteinGym_substitutions.csv"))
@@ -178,15 +178,15 @@ if supervised:
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
     # rename and remove stuff to fit into dataloader seemlessly
-    # removes info we don't use in the network, as we only use tokens and binned scores
+    # removes info we don"t use in the network, as we only use tokens and binned scores
     token_data = token_data.remove_columns(["DMS_score", "mutant", "mutated_sequence"])
-    # binned scores are renamed to 'labels'
+    # binned scores are renamed to "labels"
     token_data = token_data.rename_column("DMS_score_bin", "labels")
 
     # Split the train dataset into train, valid, and test subsets
-    dict_train_test = token_data['train'].train_test_split(test_size=0.4, shuffle=True)
-    train_dataset = dict_train_test['train']
-    test_dataset = dict_train_test['test']
+    dict_train_test = token_data["train"].train_test_split(test_size=0.4, shuffle=True)
+    train_dataset = dict_train_test["train"]
+    test_dataset = dict_train_test["test"]
 
     # subset for testruns:
     # train_dataset = train_dataset.select([x for x in range(200)])
@@ -194,8 +194,8 @@ if supervised:
 
     # # here we could split into validation and test if needed
     # dict_test_valid = test_dataset.train_test_split(test_size=0.5, shuffle=True)
-    # test_dataset = dict_test_valid['test']
-    # valid_dataset = dict_test_valid['train']
+    # test_dataset = dict_test_valid["test"]
+    # valid_dataset = dict_test_valid["train"]
 
     args = TrainingArguments(
         f"{model_name}-finetuned-localization",
@@ -234,25 +234,87 @@ else:
         # zero shot for autoregressive models, as fopund in RITA
         # https://github.com/lightonai/RITA/blob/master/compute_fitness.py
         from transformers import AutoModelForCausalLM
+        from torch.nn import CrossEntropyLoss
+        # functions
+        
+        def calc_fitness(model, prots, tokenizer, device="cuda:0", model_context_len=1023):
+            # calculates the fitness
+            loss_list = []
+            loss_fn = CrossEntropyLoss()
+            with torch.no_grad():
+                for prot in tqdm(prots):
+                    loss_val = 0
+                    
+                    sequence_chunks=[]
+                    if len(prot) < model_context_len:
+                        sequence_chunks = [prot]
+                    else:
+                        len_target_seq = len(prot)
+                        num_windows = 1 + int( len_target_seq / model_context_len)
+                        start=0
+                        for window_index in range(1, num_windows+1):
+                            sequence_chunks.append(prot[start:start+model_context_len])
+                            start += model_context_len
+                    
+                    for chunk in sequence_chunks:
+                        for p in [chunk, chunk[::-1]]:
+                            ids = torch.tensor([tokenizer.encode(p)]).to(device)
+                            input_ids = ids[:, :-1]
+                            targets   = ids[:, 1:]
+                            
+                            logits=model(input_ids).logits
+                            loss = loss_fn(target=targets.view(-1), input=logits.view(-1,logits.size(-1)))
+                            loss_val += -loss.item()
+                        
+                    loss_list += [loss_val]
+            return np.array(loss_list)
+        
+
+        # relative output path 
+        outdir = "protein_lm/evaluation/output/likelihood-autoreg/"
+        # check if output path exists
+        if not os.path.exists(outdir):
+            os.makedirs(outdir)
+        
         model = AutoModelForCausalLM.from_pretrained(checkpoint)
+        if torch.cuda.is_available() and not nogpu:
+            model = model.cuda()
+            print("Transferred model to GPU")
+        model.eval()
+        tokenizer = AptTokenizer()
+        
+        # get experiments and base seqs
+        ref_df = pd.read_csv(path + "ProteinGym_reference_file_substitutions.csv")
+        dms_ids = ref_df.DMS_id
+        dms_file = ref_df.DMS_filename
+        dms_ref_seqs = ref_df.target_seq
+        for experiment, file_name, sequence in zip(dms_ids, dms_file, dms_ref_seqs):
+
+            # Load the deep mutational scan
+            DMS_data_path = path + "ProteinGym_substitutions/" + file_name
+            DMS_data = pd.read_csv(DMS_data_path)
+            DMS_output =  "scores_{}".format(file_name)
+
+            # compute scores
+            model_scores = calc_fitness(model=model, prots=np.array(DMS_data["mutated_sequence"]), tokenizer=tokenizer)
+
+            DMS_data["APT_score"] = model_scores
+            DMS_data.to_csv(outdir + DMS_output, index=False)
+
+            spearman, _ = spearmanr(DMS_data["APT_score"], DMS_data["DMS_score"])
+            print("Performance of APT on experiment {}: {}".format(experiment, spearman))
 
     else: 
-        # here we'll add a zero-shot eval script like this: 
+        # here we"ll add a zero-shot eval script like this: 
         # https://github.com/facebookresearch/esm/blob/main/examples/variant-prediction/predict.py
-            
-        import torch
-
         # from protein_lm.modeling.models.fair_esm.data import Alphabet, FastaBatchedDataset
         # from protein_lm.modeling.models.fair_esm import pretrained
         # from protein_lm.modeling.models.fair_esm.model.msa_transformer import MSATransformer
         from esm import pretrained, Alphabet, FastaBatchedDataset, MSATransformer
         import pandas as pd
-        from tqdm import tqdm
         from Bio import SeqIO
         import itertools
         from typing import List, Tuple
-        import numpy as np
-
 
         def remove_insertions(sequence: str) -> str:
             """ Removes any insertions into the sequence. Needed to load aligned sequences in an MSA. """
@@ -295,9 +357,9 @@ else:
 
         def compute_pppl(mutated_sequence, model, alphabet):
             """
-            The original methods changes the given base_sequence to the mutated one, we'll just read it from the df.
+            The original methods changes the given base_sequence to the mutated one, we"ll just read it from the df.
             We compute the pseudo-Perplexity of the complete mutated sequence. 
-            The code to achieve this has not been changes from esm's repo
+            The code to achieve this has not been changes from esm"s repo
             """
             # wt, idx, mt = row[0], int(row[1:-1]) - offset_idx, row[-1]
             # assert sequence[idx] == wt, "The listed wildtype does not match the provided sequence"
@@ -332,11 +394,16 @@ else:
         dms_file = ref_df.DMS_filename
         dms_ref_seqs = ref_df.target_seq
 
+        # relative output path 
+        outdir = "protein_lm/evaluation/output/{}/".format(scoring_strategy)
+        # check if output path exists
+        if not os.path.exists(outdir):
+            os.makedirs(outdir)
+
         # inference for given model
         # set checkpoint to be mnodel location for now
-        model_location = checkpoint.split("/")[-1]
-
-        model, alphabet = pretrained.load_model_and_alphabet(model_location)
+        model_name = checkpoint.split("/")[-1]
+        model, alphabet = pretrained.load_model_and_alphabet(model_name)
         model.eval()
         if torch.cuda.is_available() and not nogpu:
             model = model.cuda()
@@ -345,9 +412,9 @@ else:
         for experiment, file_name, sequence in zip(dms_ids, dms_file, dms_ref_seqs):
 
             # Load the deep mutational scan
-            dms_df_path = path + "ProteinGym_substitutions/" + file_name
-            dms_df = pd.read_csv(dms_df_path)
-            dms_output =  "scores_{}".format(file_name)
+            DMS_data_path = path + "ProteinGym_substitutions/" + file_name
+            DMS_data = pd.read_csv(DMS_data_path)
+            DMS_output =  "scores_{}".format(file_name)
 
 
             batch_converter = alphabet.get_batch_converter()
@@ -372,7 +439,7 @@ else:
                 #         )
                 #     all_token_probs.append(token_probs[:, 0, i])  # vocab size
                 # token_probs = torch.cat(all_token_probs, dim=0).unsqueeze(0)
-                # dms_df[model_location] = dms_df.apply(
+                # DMS_data[model_name+"_score"] = DMS_data.apply(
                 #     lambda row: label_row(
                 #         row[mutation_col], sequence, token_probs, alphabet, offset_idx
                 #     ),
@@ -388,7 +455,7 @@ else:
                 if scoring_strategy == "wt-marginals":
                     with torch.no_grad():
                         token_probs = torch.log_softmax(model(batch_tokens.cuda())["logits"], dim=-1)
-                    dms_df[model_location] = dms_df.apply(
+                    DMS_data[model_name+"_score"] = DMS_data.apply(
                         lambda row: label_row(
                             row[mutation_col],
                             sequence,
@@ -409,7 +476,7 @@ else:
                             )
                         all_token_probs.append(token_probs[:, i])  # vocab size
                     token_probs = torch.cat(all_token_probs, dim=0).unsqueeze(0)
-                    dms_df[model_location] = dms_df.apply(
+                    DMS_data[model_name+"_score"] = DMS_data.apply(
                         lambda row: label_row(
                             row[mutation_col],
                             sequence,
@@ -421,7 +488,7 @@ else:
                     )
                 elif scoring_strategy == "pseudo-ppl":
                     tqdm.pandas()
-                    dms_df[model_location] = dms_df.progress_apply(
+                    DMS_data[model_name+"_score"] = DMS_data.progress_apply(
                         lambda row: compute_pppl(
                             #row[mutation_col],
                             # sequence,
@@ -433,4 +500,6 @@ else:
                         axis=1,
                     )
             # save experiment
-            dms_df.to_csv(outdir + dms_output, index=None)
+            DMS_data.to_csv(outdir + DMS_output, index=None)
+            spearman, _ = spearmanr(DMS_data["{}_score".format(model_name)], DMS_data["DMS_score"])
+            print("Performance of {} on experiment {}: {}".format(model_name, experiment, spearman))
