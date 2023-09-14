@@ -35,4 +35,4 @@ model:
 
 # corresponds to DataCollatorConfig
 data_collator:
-  data_collator_type: "default"
+  data_collator_type: "fim"
