@@ -5,11 +5,20 @@ The goal of this project is to uncover the best approach to scale large protein 
 
 ## Installing enviroment
 
+If you want to run on CPU:
 ```
 conda env create -f protein_lm.yml
 conda activate protein_lm_env
 pip install -e .
 ```
+
+If you plan to use cuda, use the dedicated .yaml file:
+```
+conda env create -f protein_lm_cuda.yml
+conda activate protein_lm_env
+pip install -e .
+```
+
 
 ## Installing tokenizer
 
