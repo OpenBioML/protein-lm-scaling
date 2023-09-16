@@ -61,9 +61,9 @@ def train_val_test_split(
     so that it has potentially 3 splits: "train", "val", "test", where
     "val" and "test" splits do not exist if the specified sizes are 0
     """
-    assert list(dataset_dict.keys()) == [
+    assert set(dataset_dict.keys()) == {
         "train"
-    ], f"{train_val_test_split.__name__} expects its input to have the keys \
+    }, f"{train_val_test_split.__name__} expects its input to have the keys \
         ['train'] but the input has keys {list(dataset_dict.keys())}"
 
     dataset = dataset_dict["train"]
@@ -117,17 +117,21 @@ def get_csv_dataset(config: DatasetConfig) -> Dataset:
 
 
 def get_huggingface_dataset(config: DatasetConfig) -> Dataset:
-    # Currently, the huggingface datasets we use (e.g., zpn/uniref50) has only
-    # one split "train"
     dataset_dict = load_dataset(config.dataset_loc)
+    if set(dataset_dict.keys()) == {"train", "val", "test"}:
+        return dataset_dict
+
+    assert set(dataset_dict.keys()) == {
+        "train"
+    }, f"Huggingface DatasetDicts should have the keys {{'train'}} or \
+        {{'train', 'val', 'split'}} but this DatasetDict has keys \
+            {set(dataset_dict.keys())}"
     return train_val_test_split(dataset_dict, config)
 
 
 def get_dataset(config_dict: Dict, tokenizer) -> Dataset:
     config = DatasetConfig(**config_dict)
 
-    # So far, both datasets we handle have just one split, "train"
-    # so that is the only case we handle for now
     if config.dataset_type == "csv":
         train_ds = get_csv_dataset(config)
     elif config.dataset_type == "huggingface":
