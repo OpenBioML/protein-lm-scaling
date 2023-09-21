@@ -11,6 +11,7 @@ from transformers.utils import logging
 from protein_lm.modeling.utils.rotary_embedding import RotaryEmbedding
 from protein_lm.modeling.utils.rerope_embedding import RectifiedRotaryEmbedding
 from protein_lm.modeling.utils.alibi_embedding import create_alibi_tensor
+from protein_lm.modeling.utils.scaled_rope_embedding import LlamaLinearScalingRotaryEmbedding,LlamaDynamicNTKScalingRotaryEmbedding
 
 
 logger = logging.get_logger(__name__)
@@ -28,6 +29,8 @@ class APTAttention(GPT2Attention):
         )
         self.register_buffer("masked_bias", torch.tensor(-1e4), persistent=False)
         self.position_embedding = config.position_embedding
+        self.rope_scaling_factor=config.rope_scaling_factor
+        self.rope_theta=config.rope_theta
         self.max_sequence_length = config.max_sequence_length
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
@@ -64,6 +67,10 @@ class APTAttention(GPT2Attention):
             self.rot_emb=RotaryEmbedding(dim=self.head_dim)
         elif self.position_embedding == "rerope":
             self.rot_emb = RectifiedRotaryEmbedding(dim=self.head_dim,max_position_embeddings = self.max_positions)
+        elif self.position_embedding=="linear_rope_scaling":
+            self.rot_emb=LlamaLinearScalingRotaryEmbedding(dim=self.head_dim,max_position_embeddings=self.max_positions,scaling_factor=self.rope_scaling_factor,base=self.rope_theta)
+        elif self.position_embedding=="dynamic_rope_scaling":
+            self.rot_emb=LlamaDynamicNTKScalingRotaryEmbedding(dim=self.head_dim,max_position_embeddings=self.max_positions,scaling_factor=self.rope_scaling_factor,base=self.rope_theta)
 
     
 
@@ -196,25 +203,28 @@ class APTAttention(GPT2Attention):
         key = self._split_heads(key, self.num_heads, self.head_dim)
         value = self._split_heads(value, self.num_heads, self.head_dim)
         
-
-
-       
+        kv_seq_len=key.shape[-2]
+        if layer_past is not None:
+            kv_seq_len+=layer_past[0].shape[-2]
+      
         # Apply rope embedding to query and key
         if self.rot_emb:
+            bsz, q_len, _ = hidden_states.size()
             if self.position_embedding == 'rope':
                 query, key = self.rot_emb(query,key)
             elif self.position_embedding == 'rerope':
-                bsz, q_len, _ = hidden_states.size()
                 query = query.reshape(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
                 query *= ((position_ids + 1)[:, None, :, None].log() / torch.log(torch.tensor(self.max_sequence_length)).item()).clip(1).to(query.dtype)
                 query, key = self.rot_emb(query,key,seq_len = self.max_sequence_length,position_ids=position_ids)
+            elif self.position_embedding=="linear_rope_scaling" or self.position_embedding=="dynamic_rope_scaling":
+                query = query.reshape(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+                query, key = self.rot_emb(query, key, seq_len=kv_seq_len,position_ids=position_ids)
 
-        
-            
         if layer_past is not None:
             past_key, past_value = layer_past
             key = torch.cat((past_key, key), dim=-2)
             value = torch.cat((past_value, value), dim=-2)
+
 
         if use_cache is True:
             present = (key, value)
@@ -348,7 +358,7 @@ class APTModel(GPT2PreTrainedModel):
         self.wte = nn.Embedding(config.vocab_size, self.embed_dim)
         self.position_embedding = config.position_embedding if hasattr(config, "position_embedding") else "learned"
         
-        if self.position_embedding=="learned" or self.position_embedding == 'rope' or self.position_embedding == 'rerope':
+        if self.position_embedding=="learned" or self.position_embedding == 'rope' or self.position_embedding == 'rerope' or self.position_embedding=="linear_rope_scaling" or self.position_embedding =="dynamic_rope_scaling":
             self.wpe = nn.Embedding(config.max_position_embeddings, self.embed_dim)
             self.alibi = None
         elif self.position_embedding=="alibi":
@@ -357,7 +367,7 @@ class APTModel(GPT2PreTrainedModel):
             alibi = create_alibi_tensor(attn_heads,maxpos)
             self.register_buffer('alibi',alibi)
         else:
-            raise Exception(f'position_embedding {self.position_embedding} not supported. Please select one of learned,rope,rerope or alibi')
+            raise Exception(f'position_embedding {self.position_embedding} not supported. Please select one of learned, rope, rerope, linear rope, dynamic rope or alibi')
         
         self.drop = nn.Dropout(config.embd_pdrop)
         self.h = nn.ModuleList([APTBlock(config, layer_idx=i) for i in range(config.num_hidden_layers)])
@@ -462,7 +472,7 @@ class APTModel(GPT2PreTrainedModel):
         if inputs_embeds is None:
             inputs_embeds = self.wte(input_ids)
 
-        if self.position_embedding=="learned" or self.position_embedding == 'rope' or self.position_embedding == 'rerope' :
+        if self.position_embedding=="learned" or self.position_embedding == 'rope' or self.position_embedding == 'rerope' or self.position_embedding=="linear_rope_scaling" or self.position_embedding =="dynamic_rope_scaling":
             position_embeds = self.wpe(position_ids)
             hidden_states = inputs_embeds + position_embeds
         else:
