@@ -100,7 +100,7 @@ def train_val_test_split(
         elif val_size > 0:
             split_dict["val"] = train_valtest["test"]
         else:
-            split_dict["train"] = train_valtest["test"]
+            split_dict["test"] = train_valtest["test"]
     else:
         split_dict = {
             "train": dataset,
