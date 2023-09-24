@@ -1,6 +1,7 @@
 import argparse
 import math
 
+
 import yaml
 from transformers import Trainer
 
@@ -9,6 +10,7 @@ from protein_lm.modeling.getters.dataset import get_dataset
 from protein_lm.modeling.getters.model import get_model
 from protein_lm.modeling.getters.tokenizer import get_tokenizer
 from protein_lm.modeling.getters.training_args import get_training_args
+from protein_lm.modeling.getters.wandb_log import setup_wandb
 
 
 def train(
@@ -23,7 +25,7 @@ def train(
 
     tokenizer = get_tokenizer(config_dict=config_dict["tokenizer"])
 
-    train_ds = get_dataset(
+    dataset = get_dataset(
         config_dict=config_dict["dataset"],
         tokenizer=tokenizer,
     )
@@ -38,27 +40,24 @@ def train(
     )
 
     training_args = get_training_args(
-        config_dict=config_dict["training_args"],
+        config_dict=config_dict["training_arguments"],
     )
+
+    if "wandb" in training_args.report_to:
+        setup_wandb(
+            config_dict["wandb"],
+        )
 
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=train_ds,
+        train_dataset=dataset["train"],
+        eval_dataset=dataset.get("val", None),
         data_collator=data_collator,
     )
 
-    train_result = trainer.train()
-    trainer.save_model()  # Saves the tokenizer too for easy upload
-    metrics = train_result.metrics
-    try:
-        perplexity = math.exp(metrics["train_loss"])
-    except OverflowError:
-        perplexity = float("inf")
-    metrics["perplexity"] = perplexity
-    print("metrics:", metrics)
-    trainer.log_metrics("train", metrics)
-    trainer.save_metrics("train", metrics)
+    trainer.train()
+    trainer.save_model()
     trainer.save_state()
 
 
