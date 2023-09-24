@@ -33,7 +33,4 @@ def get_model(config_dict: Dict):
             config=model_config,
         )
 
-    if torch.cuda.is_available():
-        model.cuda()
-
     return model
