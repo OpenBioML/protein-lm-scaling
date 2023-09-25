@@ -600,8 +600,8 @@ class APTLMHeadModel(GPT2PreTrainedModel):
         self.device_map = None
         
         self.contact_head=ContactPredictionHead(config.num_hidden_layers * config.num_attention_heads,
-                                            prepend_bos=False,
-                                            append_eos=False,
+                                            prepend_bos=True,
+                                            append_eos=True,
                                             eos_idx=2)        
 
         # Initialize weights and apply final processing
