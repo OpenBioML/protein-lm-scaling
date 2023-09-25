@@ -51,11 +51,11 @@ def predict_contacts_regression(model,inputs,tokenizer,device):
 
 
 if __name__ == "__main__":
-	parser = argparse.ArgumentParser(description="Contact Prediction Script")
-	parser.add_argument("--input", type=str,help="Input file containing data for contact prediction")
+	parser = argparse.ArgumentParser()
+	parser.add_argument("--input", type=str,help="dir containing data for contact prediction")
 	parser.add_argument("--configfile",default="protein_lm/configs/train/toy_localcsv.yaml",type=str, help="path to config file")
-	parser.add_argument("--model", help="model")
-	parser.add_argument("--tokenizer", type=str,help="tokenizer")
+	parser.add_argument("--model", help="APT or ESM")
+	parser.add_argument("--tokenizer", type=str,help="EsmTokenizer or AptTokenizer")
 	parser.add_argument("--type",type=str,help="jacobian or regression")
 	args = parser.parse_args()
 	device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
