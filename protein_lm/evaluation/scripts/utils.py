@@ -64,7 +64,7 @@ def get_contacts(x, symm=True, center=True, rm=1):
   j_fn_corrected = do_apc(j_fn, rm=rm)
   if symm:
     j_fn_corrected = (j_fn_corrected + j_fn_corrected.T)/2
-  return j_fn_corrected
+  return torch.tensor(j_fn_corrected)
 
 
 

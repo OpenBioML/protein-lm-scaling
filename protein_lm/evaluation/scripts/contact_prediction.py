@@ -49,15 +49,30 @@ def predict_contacts_regression(model,inputs,tokenizer,device):
         token_ids=token_ids.unsqueeze(0)
     return model.predict_contacts(token_ids)[0].cpu()
 
+def output_results(predictions,results,PDB_IDS):
+    if not os.path.exists(args.output+args.method):
+        os.makedirs(args.output+args.method)
+
+    results = pd.DataFrame(results)
+    results.to_csv(args.output+args.method+"/contact_prediction_results.csv",sep=",",index=False)
+    for name in PDB_IDS:
+        prediction = predictions[name]
+        target = contacts[name]
+        plot_contacts_and_predictions(
+            prediction, target, title = lambda prec: f"{name}: Long Range P@L: {100 * prec:0.1f}"
+        )
+        plt.savefig(args.output+args.method+"/"+name+".png")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Contact Prediction Script")
-    parser.add_argument("--input", type=str,help="dir containing data for contact prediction")
+    parser.add_argument("--input", type=str,help="dir containing .a3m files for contact prediction")
     parser.add_argument("--configfile",default="protein_lm/configs/train/toy_localcsv.yaml",type=str, help="path to config file")
     parser.add_argument("--model", help="APT or ESM")
     parser.add_argument("--tokenizer", type=str,help="AptTokenizer or EsmTokenizer")
     parser.add_argument("--method",type=str,help="contact prediction method either jacobian or regression")
+    parser.add_argument("--output",type=str,help="output dir for contact maps")
     args = parser.parse_args()
+    
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     with open(args.configfile, "r") as cf:
@@ -77,52 +92,46 @@ if __name__ == "__main__":
         tokenizer = EsmTokenizer()
 
     model.to(device)
+    PDB_IDS = [f.split("_")[0]  for f in os.listdir(args.input) if f.endswith(".a3m")]
+
+    structures = {
+        name.lower(): get_structure(PDBxFile.read(rcsb.fetch(name, "cif")))[0]
+        for name in PDB_IDS
+    }
+
+    contacts = {
+        name: contacts_from_pdb(structure, chain="A")
+        for name, structure in structures.items()
+    }
+
+    msas = {
+        name: read_msa(args.input+f"{name.lower()}_1_A.a3m")
+        for name in PDB_IDS
+    }
+
+    sequences = {
+        name: msa[0] for name, msa in msas.items()
+    }
+
+    predictions = {}
+    results = []
 
     if args.method=="jacobian":
-        for f in os.listdir(args.input):
-            data=args.input+f
-            if data.endswith(".a3m"):
-                headers, seqs = parse_fasta(data, a3m = True)
-                seq=seqs[0]
-                x,ln = tokenizer.batch_encode([seq],add_special_tokens=True),len(seq)
-                x=torch.tensor(x)
-                contacts=predict_contacts_jacobian(args.model,model,x,ln,device)
-
-                plt.figure(figsize=(10,5))
-                plt.title("jac("+args.model+"(msa[0]))")
-                plt.imshow(contacts)
-                plt.show()
-
+        for name, inputs in sequences.items():
+            x,ln = tokenizer.batch_encode([inputs[1]],add_special_tokens=True),len(inputs[1])
+            x=torch.tensor(x)
+            predictions[name]=predict_contacts_jacobian(args.model,model,x,ln,device)
+            metrics = {"id": name, "model": args.model+"(Unsupervised)"}
+            metrics.update(evaluate_prediction(predictions[name], contacts[name]))
+            results.append(metrics)
+        output_results(predictions,results,PDB_IDS)
 
     elif args.method=="regression":
-        PDB_IDS = [f.split("_")[0]  for f in os.listdir(args.input) if f.endswith(".a3m")]
 
-        structures = {
-            name.lower(): get_structure(PDBxFile.read(rcsb.fetch(name, "cif")))[0]
-            for name in PDB_IDS
-        }
-
-        contacts = {
-            name: contacts_from_pdb(structure, chain="A")
-            for name, structure in structures.items()
-        }
-
-        msas = {
-            name: read_msa(args.input+f"{name.lower()}_1_A.a3m")
-            for name in PDB_IDS
-        }
-
-        sequences = {
-            name: msa[0] for name, msa in msas.items()
-        }
-
-        predictions = {}
-        results = []
         for name, inputs in sequences.items():
             predictions[name]=predict_contacts_regression(model,inputs,tokenizer,device)
             metrics = {"id": name, "model": args.model+"(Unsupervised)"}
             metrics.update(evaluate_prediction(predictions[name], contacts[name]))
             results.append(metrics)
 
-        results = pd.DataFrame(results)
-        print(results)
+        output_results(predictions,results,PDB_IDS)
