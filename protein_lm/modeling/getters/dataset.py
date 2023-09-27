@@ -27,8 +27,11 @@ class DatasetConfig(BaseModel):
 
     # name of the column that contains the sequence
     sequence_column_name: str
-
+    
     max_sequence_length: int
+    do_curriculum_learning: bool
+    curriculum_learning_strategy: str
+    curriculum_learning_column_name: str
 
 
 def set_input_ids(
@@ -45,7 +48,18 @@ def set_input_ids(
     )
     return result
 
-
+def batch_set_curriculum_learning_column(
+    result = None,
+    input_column_name = 'sequence',
+    curriculum_learning_column_name = 'sequence_length',
+    strategy = 'sequence_length'
+):
+    if strategy == 'sequence_length':
+        #LengthGroupedSampler sorts in descending so we make it ascending by multplying with -1
+        result[curriculum_learning_column_name] = [-len(x) for x in result[input_column_name]]
+        return result
+    else:
+        raise Exception(f'invalid {strategy} provided. Supported strategy values include sequence_length')
 def set_labels(result):
     result["labels"] = result["input_ids"].copy()
     return result
@@ -149,4 +163,13 @@ def get_dataset(config_dict: Dict, tokenizer) -> Dataset:
         batched=True,
     )
     train_ds = train_ds.map(set_labels, batched=True)
+    if config.do_curriculum_learning:
+        train_ds = train_ds.map(lambda e: batch_set_curriculum_learning_column(
+            result = e,
+            input_column_name = config.sequence_column_name,
+            curriculum_learning_column_name = config.curriculum_learning_column_name,
+            strategy = config.curriculum_learning_strategy
+
+        ),batched=True)
+
     return train_ds
