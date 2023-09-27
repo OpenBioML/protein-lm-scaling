@@ -63,6 +63,7 @@ def output_results(predictions,results,PDB_IDS):
         )
         plt.savefig(args.output+args.method+"/"+name+".png")
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Contact Prediction Script")
     parser.add_argument("--input", type=str,help="dir containing .a3m files for contact prediction")
@@ -125,6 +126,7 @@ if __name__ == "__main__":
             metrics.update(evaluate_prediction(predictions[name], contacts[name]))
             results.append(metrics)
         output_results(predictions,results,PDB_IDS)
+
 
     elif args.method=="regression":
 
