@@ -1,6 +1,7 @@
 from typing import Dict, Literal, Optional
 
 from datasets import Dataset, load_dataset
+from datasets.dataset_dict import DatasetDict
 from pydantic import BaseModel
 
 
@@ -10,8 +11,19 @@ class DatasetConfig(BaseModel):
     # The path if local or the huggingface dataset name if huggingface
     dataset_loc: str
 
-    # train sample size to limit to, if any
-    train_sample_size: Optional[int] = None
+    # sample size to limit to, if any, usually for debugging
+    subsample_size: Optional[int] = None
+
+    """
+    Args for splitting into train, val, test
+    to be updated once we have more options
+    """
+    # split seed
+    split_seed: Optional[int] = None
+    # size of validation dataset
+    val_size: int
+    # size of test dataset
+    test_size: int
 
     # name of the column that contains the sequence
     sequence_column_name: str
@@ -39,20 +51,89 @@ def set_labels(result):
     return result
 
 
-def get_local_dataset(config: DatasetConfig) -> Dataset:
-    train_ds = load_dataset("csv", data_files=config.dataset_loc)["train"]
-    return train_ds
+def train_val_test_split(
+    dataset_dict: DatasetDict,
+    config: DatasetConfig,
+) -> DatasetDict:
+    """
+    Given a dictionary of datasets that only contains the split "train",
+    optionally subsamples it, and then splits it
+    so that it has potentially 3 splits: "train", "val", "test", where
+    "val" and "test" splits do not exist if the specified sizes are 0
+    """
+    assert set(dataset_dict.keys()) == {
+        "train"
+    }, f"{train_val_test_split.__name__} expects its input to have the keys \
+        ['train'] but the input has keys {list(dataset_dict.keys())}"
+
+    dataset = dataset_dict["train"]
+
+    val_size = config.val_size
+    test_size = config.test_size
+
+    assert isinstance(
+        dataset, Dataset
+    ), f"Invalid dataset type {type(dataset)}, only datasets.Dataset allowed"
+
+    dataset = dataset.shuffle(seed=config.split_seed)
+
+    if config.subsample_size is not None:
+        dataset = dataset.select(range(config.subsample_size))
+
+    valtest_size = val_size + test_size
+
+    if valtest_size > 0:
+        train_valtest = dataset.train_test_split(
+            test_size=val_size + test_size,
+            shuffle=False,
+        )
+        split_dict = {
+            "train": train_valtest["train"],
+        }
+        if test_size > 0 and val_size > 0:
+            test_val = train_valtest["test"].train_test_split(
+                test_size=test_size,
+                shuffle=False,
+            )
+            split_dict["val"] = test_val["train"]
+            split_dict["test"] = test_val["test"]
+        elif val_size > 0:
+            split_dict["val"] = train_valtest["test"]
+        else:
+            split_dict["test"] = train_valtest["test"]
+    else:
+        split_dict = {
+            "train": dataset,
+        }
+
+    split_dataset_dict = DatasetDict(split_dict)
+    return split_dataset_dict
+
+
+def get_csv_dataset(config: DatasetConfig) -> Dataset:
+    # note that a csv is read as having just one split "train"
+    dataset_dict = load_dataset("csv", data_files=config.dataset_loc)
+    return train_val_test_split(dataset_dict, config)
 
 
 def get_huggingface_dataset(config: DatasetConfig) -> Dataset:
-    train_ds = load_dataset(config.dataset_loc, streaming=True, split="train")
-    return train_ds
+    dataset_dict = load_dataset(config.dataset_loc)
+    if set(dataset_dict.keys()) == {"train", "val", "test"}:
+        return dataset_dict
+
+    assert set(dataset_dict.keys()) == {
+        "train"
+    }, f"Huggingface DatasetDicts should have the keys {{'train'}} or \
+        {{'train', 'val', 'split'}} but this DatasetDict has keys \
+            {set(dataset_dict.keys())}"
+    return train_val_test_split(dataset_dict, config)
 
 
 def get_dataset(config_dict: Dict, tokenizer) -> Dataset:
     config = DatasetConfig(**config_dict)
+
     if config.dataset_type == "csv":
-        train_ds = get_local_dataset(config)
+        train_ds = get_csv_dataset(config)
     elif config.dataset_type == "huggingface":
         train_ds = get_huggingface_dataset(config)
     else:

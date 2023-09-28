@@ -2,12 +2,15 @@
 dataset:
   dataset_type: "csv"
   dataset_loc: "protein_lm/dataset/uniref/uniref50_trimmed.csv"
-  train_sample_size: 100
+  subsample_size: 100
+  split_seed: 2
+  val_size: 10
+  test_size: 10
   sequence_column_name: "sequence"
   max_sequence_length: 10
 
-# corresponds to TrainingArgsConfig
-training_args:
+# corresponds to HuggingFace's TrainingArguments
+training_arguments:
   output_dir: "checkpoints/toy"
   max_steps: 1
   num_train_epochs: 1
@@ -30,6 +33,8 @@ model:
   nn_model_type: "APT"
   nn_model_config_args:
     position_embedding: "learned"
+    rope_scaling_factor: 1.0
+    rope_theta: 10000
     max_sequence_length: 10
   pretrained_checkpoint: null
 
