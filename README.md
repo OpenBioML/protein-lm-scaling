@@ -65,15 +65,15 @@ torchrun --standalone --nnodes=1 --nproc-per-node 3 protein_lm/modeling/scripts/
 
 ### Contact Prediction
 
-The script can be run using APT or ESM. It also has the option of choosing between `--method jacobian` where contact prediction is computed by categorical jacobian extraction or `--method regression` logistic regression based contact prediction. See [BERT-ESM1b](https://github.com/sokrypton/algosb_2021/blob/main/BERT_esm1b.ipynb) and [Rao et al. 2020](https://doi.org/10.1101/2020.12.15.422761) for details. 
+The script can be run using APT or ESM. It also has the option of choosing between `--method jacobian` where contact prediction is computed by categorical jacobian extraction or `--method regression` logistic regression based contact prediction. See [BERT-ESM1b](https://github.com/sokrypton/algosb_2021/blob/main/BERT_esm1b.ipynb) and [Rao et al. 2020](https://doi.org/10.1101/2020.12.15.422761) for details. Currently, script only supports .a3m files as input. 
 
 You can run the contact prediction eval script by
 ```
 python protein_lm/evalutation/scripts/contact_prediction.py --input /path/to/.a3m --model ESM --tokenizer EsmTokenizer --method jacobian --output /path/to/outputdir
 ```
-### outputs
-* .png file with predicted contacts overlaid on ground truth contact map
-* .csv file with contact prediction metrics
+### Outputs
+* .png file with predicted contacts overlaid on ground truth contact map.
+* .csv file with results for each protein.
 
 ## Getting involved
 Your involvement is welcome! If you are interested, you can 
