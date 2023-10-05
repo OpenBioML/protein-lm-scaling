@@ -12,7 +12,7 @@ from protein_lm.modeling.utils.rotary_embedding import RotaryEmbedding
 from protein_lm.modeling.utils.rerope_embedding import RectifiedRotaryEmbedding
 from protein_lm.modeling.utils.alibi_embedding import create_alibi_tensor
 from protein_lm.modeling.utils.scaled_rope_embedding import LlamaLinearScalingRotaryEmbedding,LlamaDynamicNTKScalingRotaryEmbedding
-
+from protein_lm.modeling.utils.modules import ContactPredictionHead
 
 logger = logging.get_logger(__name__)
 
@@ -598,6 +598,11 @@ class APTLMHeadModel(GPT2PreTrainedModel):
         # Model parallel
         self.model_parallel = False
         self.device_map = None
+        
+        self.contact_head=ContactPredictionHead(config.num_hidden_layers * config.num_attention_heads,
+                                            prepend_bos=True,
+                                            append_eos=True,
+                                            eos_idx=2)        
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -673,3 +678,22 @@ class APTLMHeadModel(GPT2PreTrainedModel):
             attentions=transformer_outputs.attentions,
             cross_attentions=transformer_outputs.cross_attentions,
         )
+
+    def predict_contacts(self, input_ids):
+        transformer_outputs = self.transformer(
+            input_ids,
+            return_dict=True,  
+            output_attentions=True,  
+        )
+        # Convert attention tuples to list
+        attentions_list = list(transformer_outputs.attentions)
+
+        # Stack the attention tensors
+        stacked_attentions = torch.stack(
+            [attn for attn in attentions_list],
+            dim=1
+        )
+               
+        contact_predictions = self.contact_head(input_ids, stacked_attentions)
+
+        return contact_predictions

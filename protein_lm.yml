@@ -12,6 +12,7 @@ dependencies:
   - pydantic>=2.0
   - wandb
   - rust
+  - biotite
   - pip:
       - transformers
       - datasets
