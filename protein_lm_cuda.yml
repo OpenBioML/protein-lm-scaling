@@ -1,16 +1,17 @@
-name: protein_lm_env
+name: protein_lm_cuda
 channels:
   - pytorch
   - huggingface
+  - nvidia
   - conda-forge
   - defaults
 dependencies:
   - python>=3.8
   - numpy
   - scipy
-  - pytorch
+  - cudatoolkit=11.7
+  - pytorch-cuda=11.7
   - pydantic>=2.0
-  - wandb
   - rust
   - pip:
       - transformers
