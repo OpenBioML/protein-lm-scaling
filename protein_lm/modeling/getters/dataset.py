@@ -49,17 +49,25 @@ def set_input_ids(
     return result
 
 def batch_set_curriculum_learning_column(
-    result = None,
-    input_column_name = 'sequence',
-    curriculum_learning_column_name = 'sequence_length',
-    strategy = 'sequence_length'
+    result=None,
+    input_column_name='sequence',
+    curriculum_learning_column_name='sequence_length',
+    strategy='sequence_length'
 ):
+    supported_strategies = ['sequence_length', 'ppl', 'plddt']
+
+    if strategy not in supported_strategies:
+        raise Exception(f'Invalid {strategy} provided. Supported strategy values include {", ".join(supported_strategies)}')
+
     if strategy == 'sequence_length':
-        #LengthGroupedSampler sorts in descending so we make it ascending by multplying with -1
+        # LengthGroupedSampler sorts in descending so we make it ascending by multiplying with -1
         result[curriculum_learning_column_name] = [-len(x) for x in result[input_column_name]]
-        return result
-    else:
-        raise Exception(f'invalid {strategy} provided. Supported strategy values include sequence_length')
+    elif strategy in ['ppl', 'plddt']:
+        # Assuming that the precomputed categories for 'ppl' and 'plddt' are stored in fields named 'ppl_category' and 'plddt_category'
+        result[curriculum_learning_column_name] = [-x for x in result[strategy + "_category"]]
+
+    return result
+
 def set_labels(result):
     result["labels"] = result["input_ids"].copy()
     return result
