@@ -1,7 +1,0 @@
-transformers
-datasets
-accelerate
-evaluate
-pytest
-fair-esm
-scipy
