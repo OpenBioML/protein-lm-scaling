@@ -164,7 +164,92 @@ class APTAttention(GPT2Attention):
 
         return attn_output, attn_weights
 
-    
+    def _gqa_attn(self, query, key, value, attention_mask=None, 
+                alibi_bias =None, dropout=0.0):
+            
+        """Group Query Attention implementation."""
+        
+        # Check for potential issues before moving on
+        if not query.ndim == key.ndim == value.ndim == 4:
+            raise ValueError(f"Expected query, key, and value to be 4-dimensional, but got shapes "
+                            f"{query.shape}, {key.shape}, and {value.shape}.")
+        
+        """
+        Expected shapes: (batch_size, num_heads, query_len, query_dim) similar to _upcast_and_reordered_attn
+        """
+        batch_size, num_heads, query_len, query_dim = query.shape
+
+
+        scale_factor = 1.0
+        if self.scale_attn_weights:
+            scale_factor /= float(value.size(-1)) ** 0.5
+        
+        if self.scale_attn_by_inverse_layer_idx:
+                attn_weights = attn_weights / float(self.layer_idx + 1)
+
+        query = query / scale_factor
+
+        '''
+        Determine the number of groups
+        For example lets say we have 4 queries heads and 2 keys heads, then we have 2 groups
+        Lets say the number of group are 2 and head are 2, 
+        then reshape the query tensor to (batch_size, (2, 2), query_len, query_dim)
+        query shape (batch_size, num_groups, num_heads, query_len, query_dim)
+        attention_weights_grouped shape (batch_size, num_groups, num_heads, query_len, key_len).
+        attention weights shape: (batch_size, num_heads, query_len, key_len)
+        '''
+
+        n_groups = query.size(1) // key.size(1)
+
+        if n_groups > 1:
+            query_shape = query.shape
+            grouped_shape = (query_shape[0], n_groups, query_shape[1]//n_groups, query_shape[2], query_shape[3])
+            query_grouped = query.reshape(grouped_shape)
+            attn_weights_grouped = torch.matmul(query_grouped, key.transpose(-2, -1))
+            attn_weights = attn_weights_grouped.sum(dim=1)
+            #print("attn_weights:", attn_weights.shape)
+
+        else:
+            '''
+            If the number of groups is 1, then we can use the normal attention function
+            '''
+            attn_weights = torch.matmul(query, key.transpose(-2, -1))
+
+
+        if attention_mask is not None:
+            # Apply the attention mask
+            '''
+            Input attention_mask shape: (batch_size, 1, query_len, key_len)
+            '''
+            attn_weights += attention_mask.unsqueeze(1)  # Unsqueeze to Add head dimension
+
+        # Causal masking ensures that the attention mechanism doesn't attend to "future" tokens in sequences.
+
+        if not self.is_cross_attention:
+            causal_mask = torch.ones((query.size(0), query.size(2), key.size(2)), device=query.device, dtype=torch.bool).tril_()
+            # causal mask is lower traingular matrix with 1s on the lower triangle and 0s on the upper triangle
+            mask_value = torch.finfo(attn_weights.dtype).min
+            # Need to be a tensor, otherwise we get error: `RuntimeError: expected scalar type float but found double`.
+            # Need to be on the same device, otherwise `RuntimeError: ..., x and y to be on the same device`
+            mask_value = torch.full([], mask_value, dtype=attn_weights.dtype).to(attn_weights.device)
+            # print("mask_value:", mask_value)
+            attn_weights = torch.where(causal_mask, attn_weights.to(attn_weights.dtype), mask_value)
+            # print("attn_weights:", attn_weights)
+        # Softmax normalization to get the attention scores
+        attn_weights = nn.functional.softmax(attn_weights, dim=-1)
+        
+        if alibi_bias is not None:
+            attn_weights = attn_weights + alibi_bias[:,:,:attn_weights.size(-1)]
+
+        # Apply dropout if specified
+        attn_weights = attn_weights.type(value.dtype)
+        attn_weights = self.attn_dropout(attn_weights)
+
+        # Compute the output by multiplying the attention scores with the value tensor.
+        attn_output = torch.matmul(attn_weights, value)
+        
+        return attn_output, attn_weights
+        
     def forward(
         self,
         hidden_states: Optional[Tuple[torch.FloatTensor]],
