@@ -63,8 +63,7 @@ def batch_set_curriculum_learning_column(
         # LengthGroupedSampler sorts in descending so we make it ascending by multiplying with -1
         result[curriculum_learning_column_name] = [-len(x) for x in result[input_column_name]]
     elif strategy in ['ppl', 'plddt']:
-        # Assuming that the precomputed categories for 'ppl' and 'plddt' are stored in fields named 'ppl_category' and 'plddt_category'
-        result[curriculum_learning_column_name] = [-x for x in result[strategy + "_category"]]
+        result[curriculum_learning_column_name] = [-x for x in result[strategy]]
 
     return result
 

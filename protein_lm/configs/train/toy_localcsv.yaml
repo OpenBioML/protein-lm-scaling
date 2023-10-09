@@ -11,12 +11,12 @@ dataset:
   do_curriculum_learning: false
   curriculum_learning_strategy:
     - 'sequence_length'
-    - 'ppl_category'
-    - 'plddt_category'
+    - 'ppl'
+    - 'plddt'
   curriculum_learning_column_name:
     - 'sequence_length'
-    - 'ppl_category_column' 
-    - 'plddt_category_column' 
+    - 'ppl' 
+    - 'plddt' 
 
 # corresponds to HuggingFace's TrainingArguments
 training_arguments:
