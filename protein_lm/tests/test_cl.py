@@ -92,7 +92,7 @@ def create_random_dataframe(sequence_column_name = 'sequence',curriculum_learnin
   random.seed(42)
   df = pd.DataFrame()
   def create_sequence(length):
-    seq = ''.join(random.choice(['A','T','G','C']) for _ in range(length))
+    seq = ''.join(random.choice('ACDEFGHIKLMNPQRSTVWY') for _ in range(length))
     return seq
 
   if curriculum_learning_strategy == 'sequence_length':
