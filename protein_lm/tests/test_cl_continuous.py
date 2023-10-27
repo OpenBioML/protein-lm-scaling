@@ -25,9 +25,17 @@ strategy2col = {'ppl': 'ppl'} #mapping of strategy to the computed column name s
 total = 0 #number of batches/steps
 unsorted = 0 #number of unsorted batches/steps
 InputDataClass = NewType("InputDataClass", Any)
+
+global max_value_of_previous_batch
+max_value_of_previous_batch = None
+global batch_comparison_values
+batch_comparison_values = []
+
 def cl_data_collator(features: List[InputDataClass]) -> Dict[str, torch.Tensor]:
     global total
     global unsorted
+    global max_value_of_previous_batch
+    global batch_comparison_values
     """
     Very simple data collator that simply collates batches of dict-like objects and performs special handling for
     potential keys named:
@@ -84,6 +92,17 @@ def cl_data_collator(features: List[InputDataClass]) -> Dict[str, torch.Tensor]:
     except:
         unsorted = unsorted + 1
         print('not sorted')
+
+    # Compare between currect batch and previous one
+    # Append min of current batch and placeholder
+    batch_comparison_values.append([lens[0], None])
+
+    if max_value_of_previous_batch is not None:
+        # Append max of the previous batch
+        batch_comparison_values[-1][1] = max_value_of_previous_batch
+    
+    max_value_of_previous_batch = lens[-1]
+
     return {'input_ids':batch['input_ids'],'labels': batch['labels']}
 
 
@@ -172,6 +191,18 @@ def test_curriculum_learning(strategy):
     )
     
     trainer.train()
+
+    threshold = 10
+    num = 0
+    # Iterate over the list
+    print(batch_comparison_values)
+    for i in batch_comparison_values:
+        print(i)
+        current_min_val, previous_max_val = i
+        if previous_max_val is not None:
+            if current_min_val < previous_max_val and previous_max_val - current_min_val <= threshold:
+                num += 1
+    assert num == 0
     percentage_unsorted = int((unsorted / total) * 100) #computing the number of times the list in collator was not sorted
     #there are sometimes cases where the list is off by a few entries aa the LengthGroupedSampler has a bit of randomness
     print(f'percentage_unsorted:{percentage_unsorted}')
