@@ -9,8 +9,14 @@ dataset:
   sequence_column_name: "sequence"
   max_sequence_length: 10
   do_curriculum_learning: false
-  curriculum_learning_strategy: 'sequence_length'
-  curriculum_learning_column_name: 'sequence_length'
+  curriculum_learning_strategy:
+    - 'sequence_length'
+    - 'ppl'
+    - 'plddt'
+  curriculum_learning_column_name:
+    - 'sequence_length'
+    - 'ppl' 
+    - 'plddt' 
 
 # corresponds to HuggingFace's TrainingArguments
 training_arguments:
