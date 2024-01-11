@@ -9,6 +9,7 @@ from transformers.modeling_outputs import (BaseModelOutputWithPastAndCrossAttent
 from transformers.pytorch_utils import Conv1D
 from transformers.activations import ACT2FN
 from transformers.utils import logging
+from mup import MuReadout
 from protein_lm.modeling.utils.rotary_embedding import RotaryEmbedding
 from protein_lm.modeling.utils.rerope_embedding import RectifiedRotaryEmbedding
 from protein_lm.modeling.utils.alibi_embedding import create_alibi_tensor
@@ -45,6 +46,7 @@ class APTAttention(GPT2Attention):
         
         # muP
         self.use_mup = config.use_mup
+        self.mup_attn_mult = config.mup_attn_mult
 
         self.scale_attn_weights = config.scale_attn_weights
         self.is_cross_attention = is_cross_attention
@@ -58,27 +60,37 @@ class APTAttention(GPT2Attention):
             self.c_attn = Conv1D(2 * self.embed_dim, self.embed_dim)
             self.q_attn = Conv1D(self.embed_dim, self.embed_dim)
 
-            #muP -- q_attn
+            #muP -- c_attn & q_attn, cross attention case
             if self.use_mup:
-                self.q_attn.weight.data.normal_(mean=0.0, std=math.sqrt((config.initializer_range ** 2) / config.mup_width_scale))
+                # default case -- mup initialization for c_attn and q_attn
+                self.c_attn.weight.normal_(mean=0.0, std=math.sqrt((config.initializer_range ** 2) / config.mup_width_scale))
+                self.c_attn.bias.zero_()
+                self.q_attn.weight.normal_(mean=0.0, std=math.sqrt((config.initializer_range ** 2) / config.mup_width_scale))
                 self.q_attn.bias.zero_()
-
+                if config.query_zero_init:
+                    # q_attn same as last third of c_attn in no cross attention case -- zero initialization
+                    self.q_attn.weight.data = 0
+                
         else:
             self.c_attn = Conv1D(3 * self.embed_dim, self.embed_dim)
-
-        #muP -- c_attn specific, see https://github.com/cofe-ai/Mu-scaling/blob/a3d13c3eaa02e28cc6ef95116358b128424f9fe4/modeling/modeling_gpt2_mup.py#L487
-        if self.use_mup:
-            if config.query_zero_init:
-                _, fanout = self.c_attn.weight.shape
-                self.c_attn.weight.data[:, :fanout//3] = 0
+            
+            #muP -- c_attn specific, see https://github.com/cofe-ai/Mu-scaling/blob/a3d13c3eaa02e28cc6ef95116358b128424f9fe4/modeling/modeling_gpt2_mup.py#L487
+            if self.use_mup:
+                # default case -- mup initialization for c_attn
+                self.c_attn.weight.data.normal_(mean=0.0, std=math.sqrt((config.initializer_range ** 2) / config.mup_width_scale))
                 self.c_attn.bias.zero_()
+                if config.query_zero_init:
+                    # last third of c_attn -- zero initialization
+                    _, fanout = self.c_attn.weight.shape
+                    self.c_attn.weight.data[:, :fanout//3] = 0
+                    
 
         self.c_proj = Conv1D(self.embed_dim, self.embed_dim)
         
         #muP -- c_proj specific, see https://github.com/cofe-ai/Mu-scaling/blob/a3d13c3eaa02e28cc6ef95116358b128424f9fe4/modeling/modeling_gpt2_mup.py#L494
         if self.use_mup:
             depth_std = config.initializer_range / math.sqrt(2 * config.n_layer)
-            self.c_proj.weight.data.normal_(mean=0.0, std=math.sqrt(config.depth_std ** 2 / config.mup_width_scale))
+            self.c_proj.weight.data.normal_(mean=0.0, std=math.sqrt(depth_std ** 2 / config.mup_width_scale))
             self.c_proj.bias.zero_()
         
         if self.use_mup:
@@ -109,9 +121,10 @@ class APTAttention(GPT2Attention):
         
         #muP
         if self.use_mup:
-            attn_weights = attn_weights / torch.full(
-                [], value.size(-1), dtype=attn_weights.dtype, device=attn_weights.device
-            )
+            if self.mup_attn_mult:
+                attn_weights = attn_weights / torch.full(
+                    [], value.size(-1), dtype=attn_weights.dtype, device=attn_weights.device
+                )
         elif self.scale_attn_weights:
             attn_weights = attn_weights / torch.full(
                 [], value.size(-1) ** 0.5, dtype=attn_weights.dtype, device=attn_weights.device
@@ -259,7 +272,6 @@ class APTAttention(GPT2Attention):
             past_key, past_value = layer_past
             key = torch.cat((past_key, key), dim=-2)
             value = torch.cat((past_value, value), dim=-2)
-
 
         if use_cache is True:
             present = (key, value)
@@ -429,7 +441,7 @@ class APTModel(GPT2PreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
 
-        self.embed_dim = config.hidden_sizeù
+        self.embed_dim = config.hidden_size
         use_mup = config.use_mup
 
         self.wte = nn.Embedding(config.vocab_size, self.embed_dim)
@@ -705,10 +717,10 @@ class APTLMHeadModel(GPT2PreTrainedModel):
         super().__init__(config)
         self.transformer = APTModel(config)
 
-        #muP TO DO: check proper behavior for LM head, nothing should be done (?)
-        #see https://github.com/cofe-ai/Mu-scaling/blob/a3d13c3eaa02e28cc6ef95116358b128424f9fe4/modeling/modeling_gpt2_mup.py#L472
-        #see also table 8's caption in https://arxiv.org/pdf/2203.03466.pdf
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        # muP
+        # TO DO: look into weight tying. if using weight tying, should we use MuSharedReadout?
+        # see https://github.com/microsoft/mup/blob/19814971934ef91dd546f88e913fc963e096d11c/mup/layer.py#L59-L68
+        self.lm_head = MuReadout(config.n_embd, config.vocab_size, bias=False, output_mult=config.output_mult, width_mult=config.mup_width_scale)
 
         # Model parallel
         self.model_parallel = False
