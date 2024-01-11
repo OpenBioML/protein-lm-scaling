@@ -20,14 +20,22 @@ import pandas as pd
 import random
 
 CONFIG_PATH = "protein_lm/configs/train/toy_localcsv.yaml"
-strategies = ['sequence_length']
-strategy2col = {'sequence_length': 'sequence_length'} #mapping of strategy to the computed column name storing the values of respective strategy
+strategies = ['ppl']
+strategy2col = {'ppl': 'ppl'} #mapping of strategy to the computed column name storing the values of respective strategy
 total = 0 #number of batches/steps
 unsorted = 0 #number of unsorted batches/steps
 InputDataClass = NewType("InputDataClass", Any)
+
+global max_value_of_previous_batch
+max_value_of_previous_batch = None
+global batch_comparison_values
+batch_comparison_values = []
+
 def cl_data_collator(features: List[InputDataClass]) -> Dict[str, torch.Tensor]:
     global total
     global unsorted
+    global max_value_of_previous_batch
+    global batch_comparison_values
     """
     Very simple data collator that simply collates batches of dict-like objects and performs special handling for
     potential keys named:
@@ -71,11 +79,11 @@ def cl_data_collator(features: List[InputDataClass]) -> Dict[str, torch.Tensor]:
             if isinstance(v, torch.Tensor):
                 batch[k] = torch.stack([f[k] for f in features])
             else:
-                if k == 'sequence_length':
+                if k == 'ppl':
                     batch[k] = [-f[k] for f in features]
                 else:
                     batch[k] = torch.tensor([f[k] for f in features])
-    lens = batch['sequence_length']
+    lens = batch['ppl']
     print('######lens(cl_data_collator)#########')
     print(lens)
     total = total + 1
@@ -84,10 +92,26 @@ def cl_data_collator(features: List[InputDataClass]) -> Dict[str, torch.Tensor]:
     except:
         unsorted = unsorted + 1
         print('not sorted')
+
+    # Compare between currect batch and previous one
+    # Append min of current batch and placeholder
+    batch_comparison_values.append([lens[0], None])
+
+    if max_value_of_previous_batch is not None:
+        # Append max of the previous batch
+        batch_comparison_values[-1][1] = max_value_of_previous_batch
+    
+    max_value_of_previous_batch = lens[-1]
+
     return {'input_ids':batch['input_ids'],'labels': batch['labels']}
 
 
-def create_random_dataframe(sequence_column_name = 'sequence',curriculum_learning_column_name = 'sequence_length',curriculum_learning_strategy = 'sequence_length',max_sequence_length = 30, n = 5000):
+def create_random_dataframe(sequence_column_name = 'sequence',
+                            curriculum_learning_column_name = 'ppl',
+                            curriculum_learning_strategy = 'ppl',
+                            max_sequence_length = 30,
+                            max_perplexity = 100.0,
+                            n = 5000):
   assert max_sequence_length > 2
   random.seed(42)
   df = pd.DataFrame()
@@ -95,9 +119,9 @@ def create_random_dataframe(sequence_column_name = 'sequence',curriculum_learnin
     seq = ''.join(random.choice('ACDEFGHIKLMNPQRSTVWY') for _ in range(length))
     return seq
 
-  if curriculum_learning_strategy == 'sequence_length':
+  if curriculum_learning_strategy == 'ppl':
     df[sequence_column_name] = [create_sequence(random.randint(2, max_sequence_length)) for i in range(n)]
-    df[curriculum_learning_column_name] = df[sequence_column_name].apply(lambda x: len(x))
+    df[curriculum_learning_column_name] = [random.uniform(1.0, max_perplexity) for _ in range(n)]
     return df
 
 @pytest.mark.parametrize("strategy",strategies)
@@ -167,9 +191,19 @@ def test_curriculum_learning(strategy):
     )
     
     trainer.train()
+
+    threshold = 10
+    num = 0
+    # Iterate over the list
+    print(batch_comparison_values)
+    for i in batch_comparison_values:
+        print(i)
+        current_min_val, previous_max_val = i
+        if previous_max_val is not None:
+            if current_min_val < previous_max_val and previous_max_val - current_min_val <= threshold:
+                num += 1
+    assert num == 0
     percentage_unsorted = int((unsorted / total) * 100) #computing the number of times the list in collator was not sorted
     #there are sometimes cases where the list is off by a few entries aa the LengthGroupedSampler has a bit of randomness
     print(f'percentage_unsorted:{percentage_unsorted}')
     assert percentage_unsorted < 10 # just a rough heuristic
-    
-    
