@@ -53,6 +53,8 @@ def train(
             config_dict["wandb"],
         )
 
+    # TO DO: add support for mup's optimizers in case use_mup is used, see e.g. https://github.com/microsoft/mup/blob/19814971934ef91dd546f88e913fc963e096d11c/mup/optim.py
+    # available via mup.optim
     trainer = Trainer(
         model=model,
         args=training_args,
