@@ -20,4 +20,3 @@ dependencies:
       - evaluate
       - pytest
       - fair-esm
-      - mup

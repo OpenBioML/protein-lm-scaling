@@ -9,7 +9,6 @@ from transformers.modeling_outputs import (BaseModelOutputWithPastAndCrossAttent
 from transformers.pytorch_utils import Conv1D
 from transformers.activations import ACT2FN
 from transformers.utils import logging
-from mup import MuReadout
 from protein_lm.modeling.utils.rotary_embedding import RotaryEmbedding
 from protein_lm.modeling.utils.rerope_embedding import RectifiedRotaryEmbedding
 from protein_lm.modeling.utils.alibi_embedding import create_alibi_tensor
@@ -17,6 +16,47 @@ from protein_lm.modeling.utils.scaled_rope_embedding import LlamaLinearScalingRo
 from protein_lm.modeling.utils.modules import ContactPredictionHead
 
 logger = logging.get_logger(__name__)
+
+class APTMuReadout(nn.Linear):
+    '''Drop-in replacement for all output linear layers.
+
+    An "output" linear layer is one that maps from a width dimension (e.g.,
+    `d_model` in a Transformer) to a non-width dimension (e.g., vocab size).
+
+    This layer implements the version of μP with a 1/width multiplier and a
+    constant variance initialization for both weights and biases.
+    '''
+    def __init__(self, *args, readout_zero_init=False, output_mult=1.0, width_mult=1.0, **kwargs):
+        self.output_mult = output_mult
+        self.readout_zero_init = readout_zero_init
+        self.width_mult_val = width_mult
+        super().__init__(*args, **kwargs)
+    
+    def width_mult(self):
+        return self.width_mult_val
+
+    def reset_parameters(self) -> None:
+        if self.readout_zero_init:
+            self.weight.data[:] = 0
+            if self.bias is not None:
+                self.bias.data[:] = 0
+        else:
+            super().reset_parameters()
+
+    def forward(self, x):
+        return super().forward(
+            self.output_mult * x / self.width_mult())
+    
+class APTMuSharedReadout(APTMuReadout):
+    '''`APTMuReadout` with weights shared with an `nn.Embedding` layer.
+    
+    Inputs:
+        weight: should be weight of an `nn.Embedding` layer
+        other inputs are fed to `MuReadout`
+    '''
+    def __init__(self, weight, bias=True, **kwargs):
+        super().__init__(*weight.shape, bias=bias, **kwargs)
+        self.weight = weight
 
 class APTAttention(GPT2Attention):
     def __init__(self, config, is_cross_attention=False, layer_idx=None):
@@ -63,9 +103,9 @@ class APTAttention(GPT2Attention):
             #muP -- c_attn & q_attn, cross attention case
             if self.use_mup:
                 # default case -- mup initialization for c_attn and q_attn
-                self.c_attn.weight.normal_(mean=0.0, std=math.sqrt((config.initializer_range ** 2) / config.mup_width_scale))
+                self.c_attn.weight.normal_(mean=0.0, std=math.sqrt((config.initializer_range ** 2) / config.width_mult_for_weights))
                 self.c_attn.bias.zero_()
-                self.q_attn.weight.normal_(mean=0.0, std=math.sqrt((config.initializer_range ** 2) / config.mup_width_scale))
+                self.q_attn.weight.normal_(mean=0.0, std=math.sqrt((config.initializer_range ** 2) / config.width_mult_for_weights))
                 self.q_attn.bias.zero_()
                 if config.query_zero_init:
                     # q_attn same as last third of c_attn in no cross attention case -- zero initialization
@@ -77,7 +117,7 @@ class APTAttention(GPT2Attention):
             #muP -- c_attn specific, see https://github.com/cofe-ai/Mu-scaling/blob/a3d13c3eaa02e28cc6ef95116358b128424f9fe4/modeling/modeling_gpt2_mup.py#L487
             if self.use_mup:
                 # default case -- mup initialization for c_attn
-                self.c_attn.weight.data.normal_(mean=0.0, std=math.sqrt((config.initializer_range ** 2) / config.mup_width_scale))
+                self.c_attn.weight.data.normal_(mean=0.0, std=math.sqrt((config.initializer_range ** 2) / config.width_mult_for_weights))
                 self.c_attn.bias.zero_()
                 if config.query_zero_init:
                     # last third of c_attn -- zero initialization
@@ -90,7 +130,7 @@ class APTAttention(GPT2Attention):
         #muP -- c_proj specific, see https://github.com/cofe-ai/Mu-scaling/blob/a3d13c3eaa02e28cc6ef95116358b128424f9fe4/modeling/modeling_gpt2_mup.py#L494
         if self.use_mup:
             depth_std = config.initializer_range / math.sqrt(2 * config.n_layer)
-            self.c_proj.weight.data.normal_(mean=0.0, std=math.sqrt(depth_std ** 2 / config.mup_width_scale))
+            self.c_proj.weight.data.normal_(mean=0.0, std=math.sqrt(depth_std ** 2 / config.width_mult_for_weights))
             self.c_proj.bias.zero_()
         
         if self.use_mup:
@@ -306,7 +346,7 @@ class APTMLP(nn.Module):
 
         #muP -- matrix-like
         if use_mup:
-            self.c_fc.weight.data.normal_(mean=0.0, std=math.sqrt((config.initializer_range ** 2) / config.mup_width_scale))
+            self.c_fc.weight.data.normal_(mean=0.0, std=math.sqrt((config.initializer_range ** 2) / config.width_mult_for_weights))
             self.c_fc.bias.zero_()
 
         self.c_proj = Conv1D(embed_dim, intermediate_size)
@@ -314,7 +354,7 @@ class APTMLP(nn.Module):
         #muP -- matrix-like, c_proj-specific, see https://github.com/cofe-ai/Mu-scaling/blob/a3d13c3eaa02e28cc6ef95116358b128424f9fe4/modeling/modeling_gpt2_mup.py#L494
         if use_mup:
             depth_std = config.initializer_range / math.sqrt(2 * config.n_layer)
-            self.c_proj.weight.data.normal_(mean=0.0, std=math.sqrt(depth_std ** 2 / config.mup_width_scale))
+            self.c_proj.weight.data.normal_(mean=0.0, std=math.sqrt(depth_std ** 2 / config.width_mult_for_weights))
             self.c_proj.bias.zero_()
 
         self.act = ACT2FN[config.activation_function]
@@ -446,7 +486,7 @@ class APTModel(GPT2PreTrainedModel):
 
         self.wte = nn.Embedding(config.vocab_size, self.embed_dim)
         
-        #muP -- vector-like, zero if zero init or mantained regardless of width
+        #muP -- vector-like, zero if zero init or mantained constant regardless of width
         if use_mup:
             if config.wte_zero_init:
                 self.wte.weight.data.zero_()
@@ -596,7 +636,7 @@ class APTModel(GPT2PreTrainedModel):
 
         if self.position_embedding=="learned" or self.position_embedding == 'rope' or self.position_embedding == 'rerope' or self.position_embedding=="linear_rope_scaling" or self.position_embedding =="dynamic_rope_scaling":
             position_embeds = self.wpe(position_ids)
-            position_embeds.mul_(self.mup_rp_embedding_mult)
+            position_embeds.mul_(self.mup_embedding_mult)
             hidden_states = inputs_embeds + position_embeds
         else:
             hidden_states = inputs_embeds
@@ -718,9 +758,8 @@ class APTLMHeadModel(GPT2PreTrainedModel):
         self.transformer = APTModel(config)
 
         # muP
-        # TO DO: look into weight tying. if using weight tying, should we use MuSharedReadout?
-        # see https://github.com/microsoft/mup/blob/19814971934ef91dd546f88e913fc963e096d11c/mup/layer.py#L59-L68
-        self.lm_head = MuReadout(config.n_embd, config.vocab_size, bias=False, output_mult=config.output_mult, width_mult=config.mup_width_scale)
+        # TO DO: look into weight tying. if using weight tying, APTMuSharedReadout should be used instead
+        self.lm_head = APTMuReadout(config.n_embd, config.vocab_size, bias=False, output_mult=config.output_mult, width_mult=config.width_mult_for_weights)
 
         # Model parallel
         self.model_parallel = False

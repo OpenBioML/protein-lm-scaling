@@ -11,16 +11,26 @@ class APTConfig(GPT2Config):
         position_embedding="learned",
         tokenizer=None,
         max_sequence_length = 1024,
-        use_mup = False,
         query_zero_init = True,
         n_layer = None,
         initializer_range = 0.02,
-        mup_init_scale = 1.0,
+
+        # whether to use MuParametrization
+        use_mup = False, 
+
+        # whether to initialize the input embedding layer with zero-initialization
+        wte_zero_init = True,
+
+        # the output layer multiplier if mup is used, see https://github.com/microsoft/mup/blob/19814971934ef91dd546f88e913fc963e096d11c/mup/layer.py#L56
         mup_output_mult = 1.0,
-        mup_attn_mult = 1.0,
+
+        # whether to scale attention weights by the key dimension instead of its square root 
+        mup_attn_mult = True, 
+        
+        # the positional embedding multiplier if mup is used
         mup_embedding_mult = 1.0,
-        mup_rp_embedding_mult = 1.0,
-        mup_width_scale = 2.0,
+
+        width_mult_for_weights = 2.0,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -30,13 +40,13 @@ class APTConfig(GPT2Config):
         self.max_sequence_length = max_sequence_length
         
         self.use_mup = use_mup
+        self.wte_zero_init = wte_zero_init
         self.query_zero_init = query_zero_init,
         self.n_layer = n_layer
         self.initializer_range = initializer_range
-        self.mup_init_scale = mup_init_scale
         self.mup_output_mult = mup_output_mult
         self.mup_attn_mult = mup_attn_mult
         self.mup_embedding_mult = mup_embedding_mult
-        self.mup_rp_embedding_mult = mup_rp_embedding_mult
-        self.mup_width_scale = mup_width_scale
+        self.width_mult_for_weights = width_mult_for_weights
+
 
