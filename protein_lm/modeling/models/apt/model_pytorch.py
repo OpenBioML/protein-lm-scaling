@@ -759,7 +759,11 @@ class APTLMHeadModel(GPT2PreTrainedModel):
 
         # muP
         # TO DO: look into weight tying. if using weight tying, APTMuSharedReadout should be used instead
-        self.lm_head = APTMuReadout(config.n_embd, config.vocab_size, bias=False, output_mult=config.output_mult, width_mult=config.width_mult_for_weights)
+        self.lm_head = APTMuReadout(config.n_embd, config.vocab_size,
+                                    bias=False,
+                                    readout_zero_init=config.readout_zero_init,
+                                    output_mult=config.output_mult,
+                                    width_mult=config.width_mult_for_weights)
 
         # Model parallel
         self.model_parallel = False

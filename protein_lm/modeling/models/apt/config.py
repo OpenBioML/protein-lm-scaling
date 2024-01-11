@@ -21,6 +21,9 @@ class APTConfig(GPT2Config):
         # whether to initialize the input embedding layer with zero-initialization
         wte_zero_init = True,
 
+        # whether to initialize the output (readout) layer with zero-initialization
+        readout_zero_init = True, 
+
         # the output layer multiplier if mup is used, see https://github.com/microsoft/mup/blob/19814971934ef91dd546f88e913fc963e096d11c/mup/layer.py#L56
         mup_output_mult = 1.0,
 
@@ -44,6 +47,7 @@ class APTConfig(GPT2Config):
         self.query_zero_init = query_zero_init,
         self.n_layer = n_layer
         self.initializer_range = initializer_range
+        self.readout_zero_init = readout_zero_init
         self.mup_output_mult = mup_output_mult
         self.mup_attn_mult = mup_attn_mult
         self.mup_embedding_mult = mup_embedding_mult
