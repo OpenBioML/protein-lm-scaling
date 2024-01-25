@@ -9,6 +9,7 @@ from transformers.modeling_outputs import (BaseModelOutputWithPastAndCrossAttent
 from transformers.pytorch_utils import Conv1D
 from transformers.activations import ACT2FN
 from transformers.utils import logging
+from mup import MuReadout, MuSharedReadout, normal_
 from protein_lm.modeling.utils.rotary_embedding import RotaryEmbedding
 from protein_lm.modeling.utils.rerope_embedding import RectifiedRotaryEmbedding
 from protein_lm.modeling.utils.alibi_embedding import create_alibi_tensor
@@ -17,46 +18,6 @@ from protein_lm.modeling.utils.modules import ContactPredictionHead
 
 logger = logging.get_logger(__name__)
 
-class APTMuReadout(nn.Linear):
-    '''Drop-in replacement for all output linear layers.
-
-    An "output" linear layer is one that maps from a width dimension (e.g.,
-    `d_model` in a Transformer) to a non-width dimension (e.g., vocab size).
-
-    This layer implements the version of μP with a 1/width multiplier and a
-    constant variance initialization for both weights and biases.
-    '''
-    def __init__(self, *args, readout_zero_init=False, output_mult=1.0, width_mult=1.0, **kwargs):
-        self.output_mult = output_mult
-        self.readout_zero_init = readout_zero_init
-        self.width_mult_val = width_mult
-        super().__init__(*args, **kwargs)
-    
-    def width_mult(self):
-        return self.width_mult_val
-
-    def reset_parameters(self) -> None:
-        if self.readout_zero_init:
-            self.weight.data[:] = 0
-            if self.bias is not None:
-                self.bias.data[:] = 0
-        else:
-            super().reset_parameters()
-
-    def forward(self, x):
-        return super().forward(
-            self.output_mult * x / self.width_mult())
-    
-class APTMuSharedReadout(APTMuReadout):
-    '''`APTMuReadout` with weights shared with an `nn.Embedding` layer.
-    
-    Inputs:
-        weight: should be weight of an `nn.Embedding` layer
-        other inputs are fed to `MuReadout`
-    '''
-    def __init__(self, weight, bias=True, **kwargs):
-        super().__init__(*weight.shape, bias=bias, **kwargs)
-        self.weight = weight
 
 class APTAttention(GPT2Attention):
     def __init__(self, config, is_cross_attention=False, layer_idx=None):
@@ -83,10 +44,13 @@ class APTAttention(GPT2Attention):
                 f"`embed_dim` must be divisible by num_heads (got `embed_dim`: {self.embed_dim} and `num_heads`:"
                 f" {self.num_heads})."
             )
-        
+
         # muP
         self.use_mup = config.use_mup
-        self.mup_attn_mult = config.mup_attn_mult
+        self.attn_score = nn.Identity() # just for coordcheck
+        self.query = nn.Identity() # just for coordcheck
+        self.key = nn.Identity() # just for coordcheck
+        self.value = nn.Identity() # just for coordcheck
 
         self.scale_attn_weights = config.scale_attn_weights
         self.is_cross_attention = is_cross_attention
@@ -99,40 +63,11 @@ class APTAttention(GPT2Attention):
         if self.is_cross_attention:
             self.c_attn = Conv1D(2 * self.embed_dim, self.embed_dim)
             self.q_attn = Conv1D(self.embed_dim, self.embed_dim)
-
-            #muP -- c_attn & q_attn, cross attention case
-            if self.use_mup:
-                # default case -- mup initialization for c_attn and q_attn
-                self.c_attn.weight.normal_(mean=0.0, std=math.sqrt((config.initializer_range ** 2) / config.width_mult_for_weights))
-                self.c_attn.bias.zero_()
-                self.q_attn.weight.normal_(mean=0.0, std=math.sqrt((config.initializer_range ** 2) / config.width_mult_for_weights))
-                self.q_attn.bias.zero_()
-                if config.query_zero_init:
-                    # q_attn same as last third of c_attn in no cross attention case -- zero initialization
-                    self.q_attn.weight.data = 0
-                
         else:
             self.c_attn = Conv1D(3 * self.embed_dim, self.embed_dim)
-            
-            #muP -- c_attn specific, see https://github.com/cofe-ai/Mu-scaling/blob/a3d13c3eaa02e28cc6ef95116358b128424f9fe4/modeling/modeling_gpt2_mup.py#L487
-            if self.use_mup:
-                # default case -- mup initialization for c_attn
-                self.c_attn.weight.data.normal_(mean=0.0, std=math.sqrt((config.initializer_range ** 2) / config.width_mult_for_weights))
-                self.c_attn.bias.zero_()
-                if config.query_zero_init:
-                    # last third of c_attn -- zero initialization
-                    _, fanout = self.c_attn.weight.shape
-                    self.c_attn.weight.data[:, :fanout//3] = 0
-                    
 
         self.c_proj = Conv1D(self.embed_dim, self.embed_dim)
-        
-        #muP -- c_proj specific, see https://github.com/cofe-ai/Mu-scaling/blob/a3d13c3eaa02e28cc6ef95116358b128424f9fe4/modeling/modeling_gpt2_mup.py#L494
-        if self.use_mup:
-            depth_std = config.initializer_range / math.sqrt(2 * config.n_layer)
-            self.c_proj.weight.data.normal_(mean=0.0, std=math.sqrt(depth_std ** 2 / config.width_mult_for_weights))
-            self.c_proj.bias.zero_()
-        
+
         if self.use_mup:
             self.attn_dropout = nn.Identity()
             self.resid_dropout = nn.Identity()
@@ -142,7 +77,7 @@ class APTAttention(GPT2Attention):
 
         self.pruned_heads = set()
 
-        
+
 
         self.rot_emb=None
         if self.position_embedding == "rope":
@@ -154,21 +89,23 @@ class APTAttention(GPT2Attention):
         elif self.position_embedding=="dynamic_rope_scaling":
             self.rot_emb=LlamaDynamicNTKScalingRotaryEmbedding(dim=self.head_dim,max_position_embeddings=self.max_positions,scaling_factor=self.rope_scaling_factor,base=self.rope_theta)
 
-    
+
 
     def _attn(self, query, key, value, attention_mask=None, head_mask=None,alibi_bias=None):
         attn_weights = torch.matmul(query, key.transpose(-1, -2))
-        
+
         #muP
-        if self.use_mup:
-            if self.mup_attn_mult:
+        if self.scale_attn_weights:
+            if self.use_mup:
                 attn_weights = attn_weights / torch.full(
                     [], value.size(-1), dtype=attn_weights.dtype, device=attn_weights.device
                 )
-        elif self.scale_attn_weights:
-            attn_weights = attn_weights / torch.full(
-                [], value.size(-1) ** 0.5, dtype=attn_weights.dtype, device=attn_weights.device
-            )
+            else:
+                attn_weights = attn_weights / torch.full(
+                    [], value.size(-1) ** 0.5, dtype=attn_weights.dtype, device=attn_weights.device
+                )
+
+        attn_weights = self.attn_score(attn_weights)
 
         # Layer-wise attention scaling
         if self.scale_attn_by_inverse_layer_idx:
@@ -185,7 +122,7 @@ class APTAttention(GPT2Attention):
             attn_weights = torch.where(causal_mask, attn_weights.to(attn_weights.dtype), mask_value)
         if alibi_bias is not None:
             attn_weights = attn_weights + alibi_bias[:,:,:attn_weights.size(-1)]
-        
+
         if attention_mask is not None:
             # Apply the attention mask
             attn_weights = attn_weights + attention_mask
@@ -238,7 +175,7 @@ class APTAttention(GPT2Attention):
 
         if alibi_bias is not None:
             attn_weights = attn_weights + alibi_bias[:,:,:attn_weights.size(-1)]
-        
+
         if attention_mask is not None:
             # Apply the attention mask
             attn_weights = attn_weights + attention_mask
@@ -259,7 +196,7 @@ class APTAttention(GPT2Attention):
 
         return attn_output, attn_weights
 
-    
+
     def forward(
         self,
         hidden_states: Optional[Tuple[torch.FloatTensor]],
@@ -290,11 +227,15 @@ class APTAttention(GPT2Attention):
         query = self._split_heads(query, self.num_heads, self.head_dim)
         key = self._split_heads(key, self.num_heads, self.head_dim)
         value = self._split_heads(value, self.num_heads, self.head_dim)
-        
+
+        query = self.query(query)
+        key = self.key(key)
+        value = self.value(value)
+
         kv_seq_len=key.shape[-2]
         if layer_past is not None:
             kv_seq_len+=layer_past[0].shape[-2]
-      
+
         # Apply rope embedding to query and key
         if self.rot_emb:
             bsz, q_len, _ = hidden_states.size()
@@ -344,18 +285,7 @@ class APTMLP(nn.Module):
 
         self.c_fc = Conv1D(intermediate_size, embed_dim)
 
-        #muP -- matrix-like
-        if use_mup:
-            self.c_fc.weight.data.normal_(mean=0.0, std=math.sqrt((config.initializer_range ** 2) / config.width_mult_for_weights))
-            self.c_fc.bias.zero_()
-
         self.c_proj = Conv1D(embed_dim, intermediate_size)
-
-        #muP -- matrix-like, c_proj-specific, see https://github.com/cofe-ai/Mu-scaling/blob/a3d13c3eaa02e28cc6ef95116358b128424f9fe4/modeling/modeling_gpt2_mup.py#L494
-        if use_mup:
-            depth_std = config.initializer_range / math.sqrt(2 * config.n_layer)
-            self.c_proj.weight.data.normal_(mean=0.0, std=math.sqrt(depth_std ** 2 / config.width_mult_for_weights))
-            self.c_proj.bias.zero_()
 
         self.act = ACT2FN[config.activation_function]
 
@@ -379,32 +309,15 @@ class APTBlock(nn.Module):
         inner_dim = config.n_inner if config.n_inner is not None else 4 * hidden_size
 
         #muP
-        use_mup = config.use_mup
+        self.use_mup = config.use_mup
 
         self.ln_1 = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
-
-        #muP -- vector-like
-        if self.use_mup:
-            self.ln_1.weight.data.fill_(1.0)
-            self.ln_1.bias.data.zero_()
-        
         self.attn = APTAttention(config, layer_idx=layer_idx)
         self.ln_2 = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
 
-        #muP -- vector-like
-        if use_mup:
-            self.ln_2.weight.data.fill_(1.0)
-            self.ln_2.bias.data.zero_()
-
         if config.add_cross_attention:
-            #muP TO DO: check proper behavior in case of crossattention
             self.crossattention = APTAttention(config, is_cross_attention=True, layer_idx=layer_idx)
             self.ln_cross_attn = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
-
-            #muP -- vector-like
-            if use_mup:
-                self.ln_cross_attn.weight.data.fill_(1.0)
-                self.ln_cross_attn.bias.data.zero_()
 
         self.mlp = APTMLP(inner_dim, config)
 
@@ -485,41 +398,21 @@ class APTModel(GPT2PreTrainedModel):
         use_mup = config.use_mup
 
         self.wte = nn.Embedding(config.vocab_size, self.embed_dim)
-        
-        #muP -- vector-like, zero if zero init or mantained constant regardless of width
-        if use_mup:
-            if config.wte_zero_init:
-                self.wte.weight.data.zero_()
-            else:
-                self.wte.weight.data.normal_(mean=0.0, std=config.initializer_range)
-
-            if self.wte.padding_idx is not None:
-                self.wte.weight.data[self.wte.padding_idx].zero_()
 
         self.position_embedding = config.position_embedding if hasattr(config, "position_embedding") else "learned"
-        
+
         if self.position_embedding=="learned" or self.position_embedding == 'rope' or self.position_embedding == 'rerope' or self.position_embedding=="linear_rope_scaling" or self.position_embedding =="dynamic_rope_scaling":
             self.wpe = nn.Embedding(config.max_position_embeddings, self.embed_dim)
-            
-            #muP -- vector-like, constant regardless of width
-            #muP TO DO: check proper behavior in rope & rerope case
-            if self.use_mup:
-                self.wpe.weight.data.normal_(0.0, std=config.initializer_range)
-
-                if self.wpe.padding_idx is not None:
-                    self.wpe.weight.data[self.wte.padding_idx].zero_()
-
             self.alibi = None
         elif self.position_embedding=="alibi":
-            #muP TO DO: check proper behavior in alibi case 
-            
+            #muP TO DO: check proper behavior in alibi case
             maxpos = config.n_positions
             attn_heads = config.n_head
             alibi = create_alibi_tensor(attn_heads,maxpos)
             self.register_buffer('alibi',alibi)
         else:
             raise Exception(f'position_embedding {self.position_embedding} not supported. Please select one of learned, rope, rerope, linear rope, dynamic rope or alibi')
-        
+
         #muP
         if use_mup:
             self.drop = nn.Identity()
@@ -529,11 +422,6 @@ class APTModel(GPT2PreTrainedModel):
         self.h = nn.ModuleList([APTBlock(config, layer_idx=i) for i in range(config.num_hidden_layers)])
 
         self.ln_f = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
-
-        #muP -- vector-like
-        if use_mup:
-            self.ln_f.weight.data.fill_(1.0)
-            self.ln_f.bias.data.zero_()
 
         # Model parallel
         self.model_parallel = False
@@ -636,11 +524,10 @@ class APTModel(GPT2PreTrainedModel):
 
         if self.position_embedding=="learned" or self.position_embedding == 'rope' or self.position_embedding == 'rerope' or self.position_embedding=="linear_rope_scaling" or self.position_embedding =="dynamic_rope_scaling":
             position_embeds = self.wpe(position_ids)
-            position_embeds.mul_(self.mup_embedding_mult)
             hidden_states = inputs_embeds + position_embeds
         else:
             hidden_states = inputs_embeds
-        
+
 
         if token_type_ids is not None:
             token_type_embeds = self.wte(token_type_ids)
@@ -758,24 +645,76 @@ class APTLMHeadModel(GPT2PreTrainedModel):
         self.transformer = APTModel(config)
 
         # muP
-        # TO DO: look into weight tying. if using weight tying, APTMuSharedReadout should be used instead
-        self.lm_head = APTMuReadout(config.n_embd, config.vocab_size,
-                                    bias=False,
-                                    readout_zero_init=config.readout_zero_init,
-                                    output_mult=config.output_mult,
-                                    width_mult=config.width_mult_for_weights)
+        # TO DO: look into weight tying
+        # TO DO: if weight tying is used, APTMuSharedReadout with the proper tied weight should be used instead
+        self.lm_head = MuReadout(config.n_embd,
+                                 config.vocab_size,
+                                 bias=False,
+                                 readout_zero_init=config.readout_zero_init,
+                                 output_mult=config.output_mult)
+        
+        # mup
+        # note that this has to be run after mup.set_base_shape for it to work
+        # see https://github.com/microsoft/mup#basic-usage
+        # not sure if this is required here
+        self.apply(self._init_weights)
 
         # Model parallel
         self.model_parallel = False
         self.device_map = None
         
-        self.contact_head=ContactPredictionHead(config.num_hidden_layers * config.num_attention_heads,
-                                            prepend_bos=True,
-                                            append_eos=True,
-                                            eos_idx=2)        
+        # mup implementation does not currently support this
+        if config.contact_prediction_head:
+            self.contact_head=ContactPredictionHead(config.num_hidden_layers * config.num_attention_heads,
+                                                prepend_bos=True,
+                                                append_eos=True,
+                                                eos_idx=2)        
 
         # Initialize weights and apply final processing
         self.post_init()
+
+    # mup
+    # general function for mup-specific weight initialization
+    def _init_weights(self, module):
+        if isinstance(module, (MuReadout, MuSharedReadout)) and self.config.readout_zero_init:
+            module.weight.data.zero_()
+        elif isinstance(module, (nn.Linear, Conv1D)):
+            if hasattr(module.weight, 'infshape'):
+                normal_(module.weight, mean=0.0, std=self.config.initializer_range)
+            else:
+                module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            if module.bias is not None:
+                module.bias.data.zero_()
+        elif isinstance(module, nn.Embedding):
+            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            if module.padding_idx is not None:
+                module.weight.data[module.padding_idx].zero_()
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
+
+        if isinstance(module, APTAttention):
+            if hasattr(module, "q_attn"):
+                # cross attention case
+                if self.config.query_zero_init:
+                    # q_attn same as last third of c_attn in no cross attention case -- zero initialization
+                    self.q_attn.weight.data = 0
+            else:
+                if self.config.query_zero_init:
+                    _, fanout = module.c_attn.weight.shape
+                    assert fanout % 3 == 0
+                    module.c_attn.weight.data[:, :fanout//3] = 0
+
+        depth_std = self.config.initializer_range / math.sqrt(2 * self.config.n_layer)
+        for name, p in module.named_parameters():
+            if "c_proj" in name and "weight" in name:
+                # Special Scaled Initialization --> There are 2 Layer Norms per Transformer Block
+                if hasattr(p, 'infshape'):
+                    normal_(p, mean=0.0, std=depth_std)
+                else:
+                    p.data.normal_(mean=0.0, std=depth_std)
+
+
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
