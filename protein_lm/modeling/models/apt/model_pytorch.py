@@ -30,8 +30,7 @@ class APTAttention(GPT2Attention):
         )
         self.register_buffer("masked_bias", torch.tensor(-1e4), persistent=False)
         self.position_embedding = config.position_embedding
-        self.rope_scaling_factor=config.rope_scaling_factor
-        self.rope_theta=config.rope_theta
+        
         self.max_sequence_length = config.max_sequence_length
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
@@ -72,15 +71,18 @@ class APTAttention(GPT2Attention):
 
         self.pruned_heads = set()
 
-        self.rot_emb=None
-        if self.position_embedding == "rope":
-            self.rot_emb=RotaryEmbedding(dim=self.head_dim)
-        elif self.position_embedding == "rerope":
-            self.rot_emb = RectifiedRotaryEmbedding(dim=self.head_dim,max_position_embeddings = self.max_positions)
-        elif self.position_embedding=="linear_rope_scaling":
-            self.rot_emb=LlamaLinearScalingRotaryEmbedding(dim=self.head_dim,max_position_embeddings=self.max_positions,scaling_factor=self.rope_scaling_factor,base=self.rope_theta)
-        elif self.position_embedding=="dynamic_rope_scaling":
-            self.rot_emb=LlamaDynamicNTKScalingRotaryEmbedding(dim=self.head_dim,max_position_embeddings=self.max_positions,scaling_factor=self.rope_scaling_factor,base=self.rope_theta)
+        self.rot_emb = None
+        if self.position_embedding in ["rope", "rerope", "linear_rope_scaling", "dynamic_rope_scaling"]:
+            self.rope_scaling_factor = config.rope_scaling_factor
+            self.rope_theta = config.rope_theta
+            if self.position_embedding == "rope":
+                self.rot_emb=RotaryEmbedding(dim=self.head_dim)
+            elif self.position_embedding == "rerope":
+                self.rot_emb = RectifiedRotaryEmbedding(dim=self.head_dim,max_position_embeddings = self.max_positions)
+            elif self.position_embedding=="linear_rope_scaling":
+                self.rot_emb=LlamaLinearScalingRotaryEmbedding(dim=self.head_dim,max_position_embeddings=self.max_positions,scaling_factor=self.rope_scaling_factor,base=self.rope_theta)
+            elif self.position_embedding=="dynamic_rope_scaling":
+                self.rot_emb=LlamaDynamicNTKScalingRotaryEmbedding(dim=self.head_dim,max_position_embeddings=self.max_positions,scaling_factor=self.rope_scaling_factor,base=self.rope_theta)
 
     
 

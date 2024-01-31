@@ -30,8 +30,8 @@ class DatasetConfig(BaseModel):
     
     max_sequence_length: int
     do_curriculum_learning: bool
-    curriculum_learning_strategy: str
-    curriculum_learning_column_name: str
+    curriculum_learning_strategy: Optional[str] = None
+    curriculum_learning_column_name: Optional[str] = None
 
 
 def set_input_ids(
