@@ -697,7 +697,7 @@ class APTLMHeadModel(GPT2PreTrainedModel):
             if hasattr(module, "q_attn"):
                 # cross attention case
                 if self.config.query_zero_init:
-                    # q_attn same as last third of c_attn in no cross attention case -- zero initialization
+                    # q_attn same as first third of c_attn in no cross attention case -- zero initialization
                     self.q_attn.weight.data = 0
             else:
                 if self.config.query_zero_init:
