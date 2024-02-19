@@ -1,8 +1,14 @@
 # %%
 from math import log2
 from Bio import SeqIO
-import pandas as pd
-from multiprocessing import Pool
+
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from transformers import AutoTokenizer, AutoModel, EsmModel
+import torch
+from scipy.sparse.csgraph import minimum_spanning_tree
+
+
 
 # %%
 # simple metrics
@@ -122,8 +128,79 @@ def compute_KLD_fasta(fasta_file, alphabet, background_freq):
 
     return KLDs
 
+# %%
+# intrinsic dimension as suggested by @Amelie-Schreiber
+# https://huggingface.co/blog/AmelieSchreiber/intrinsic-dimension-of-proteins
 
+def estimate_persistent_homology_dimension_avg(sequence, model, tokenizer, num_subsets=5, num_iterations=10):
+    """
+    Estimate the persistent homology dimension of a given protein sequence.
+    
+    Parameters:
+    - sequence: A string representing the protein sequence.
+    - model: a model that computes embeddings from the prot seq, tested only with esm atm
+    - tokenizer: tokenizer fitting to the model.
+    - num_subsets: A positive integer indicating the number of subsets of the embedding vectors to use. Max of 2**n where n=len(sequence). 
+    - num_iterations: A positive integer indicating the number of iterations for averaging.
+    
+    Returns:
+    - avg_phd: Average estimated persistent homology dimension.
+    """
+    
+    phd_values = []  # List to store PHD values for each iteration
+    
+    for _ in range(num_iterations):
+        
+        # Tokenize the input and convert to tensors
+        inputs = tokenizer(sequence, return_tensors='pt')
 
+        # Get the embeddings
+        with torch.no_grad():
+            outputs = model(**inputs)
+            embeddings = outputs.last_hidden_state[0].numpy()
+
+        # Remove the first and last embeddings (<CLS> and <EOS>)
+        embeddings = embeddings[1:-1]
+
+        # Sizes for the subsets to sample
+        sizes = np.linspace(2, len(embeddings), num=num_subsets, dtype=int)
+
+        # Prepare data for linear regression
+        x = []
+        y = []
+
+        for size in sizes:
+            # Sample a subset of the embeddings
+            subset = np.random.choice(len(embeddings), size, replace=False)
+            subset_embeddings = embeddings[subset]
+
+            # Compute the distance matrix
+            dist_matrix = np.sqrt(np.sum((subset_embeddings[:, None] - subset_embeddings)**2, axis=-1))
+
+            # Compute the minimum spanning tree
+            mst = minimum_spanning_tree(dist_matrix).toarray()
+
+            # Calculate the persistent score E (the maximum edge length in the MST)
+            E = np.max(mst)
+
+            # Append to the data for linear regression
+            x.append(np.log(size))
+            y.append(np.log(E))
+
+        # Reshape for sklearn
+        X = np.array(x).reshape(-1, 1)
+        Y = np.array(y).reshape(-1, 1)
+
+        # Linear regression
+        reg = LinearRegression().fit(X, Y)
+
+        # Estimated Persistent Homology Dimension for this iteration
+        phd = 1 / (1 - reg.coef_[0][0])
+        
+        phd_values.append(phd)
+    
+    avg_phd = np.mean(phd_values)  # Average over all iterations
+    return avg_phd
 # %%
 
 prot_seq = "ARNDCEQGHILKMFPSTWYVARNDCEQGHILKMFPSTWYV"
@@ -159,7 +236,16 @@ test_fasta_path = "C:/Users/maxsp/Work/prots_test_complexity.fasta"
 num_sequences = sum(1 for _ in SeqIO.parse(test_fasta_path, "fasta"))
 
 # %%
+# run on test fasta
 background = get_background_from_fasta_no_alignment(test_fasta_path, alphabet, num_sequences)
+KLD = compute_KLD_fasta(test_fasta_path, alphabet, background)
 
 # %%
-KLD = compute_KLD_fasta(test_fasta_path, alphabet, background)
+# test intrinsic dim stuff
+# Load the tokenizer and model
+model_path = "facebook/esm2_t6_8M_UR50D"
+tokenizer = AutoTokenizer.from_pretrained(model_path)
+model = EsmModel.from_pretrained(model_path)
+
+estimate_persistent_homology_dimension_avg(prot_seq, model, tokenizer, num_subsets=2, num_iterations=10)
+estimate_persistent_homology_dimension_avg(prot_seq_low_comp, model, tokenizer, num_subsets=2, num_iterations=10)
