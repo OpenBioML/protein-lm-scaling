@@ -2,35 +2,7 @@
 from math import log2
 from Bio import SeqIO
 import pandas as pd
-# %%
-prot_seq = "ARNDCEQGHILKMFPSTWYVARNDCEQGHILKMFPSTWYV"
-prot_seq_halfhalf = "ARNDCEQGHILKMFPSTWYVAAAAAAAAAAAAAAAAAAAA"
-prot_seq_low_comp = "MMAAAMMAAAMMAAAMMAAAMMAAAMMAAAMMAAAMMAAA"
-prot_seq_homo_rep = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-prot_seq_homo_rep_halflength = "AAAAAAAAAAAAAAAAAAAA"
-
-alphabet = [
-    'A',
-    'R',
-    'N',
-    'D',
-    'C',
-    'E',
-    'Q',
-    'G',
-    'H',
-    'I',
-    'L',
-    'K',
-    'M',
-    'F',
-    'P',
-    'S',
-    'T',
-    'W',
-    'Y',
-    'V'
-]
+from multiprocessing import Pool
 
 # %%
 # simple metrics
@@ -65,7 +37,7 @@ def compute_kullback_leibler(seq, alphabet, background_freq=None):
     computesKL-divergence given a background frequency  
     as zero freq AAs are a possibility, we skip zero frqs in the sumation. 
     if AAs in background equal zero, this will also throw an error!
-    TODO: either catch if similarly to AA freq in seq or smooth?
+    TODO: either drop similarly to AA freq in seq or smooth?
     """
     # set background to 0.05 for each if none given
     if background_freq == None:
@@ -92,24 +64,102 @@ def compute_kullback_leibler(seq, alphabet, background_freq=None):
         }
 
     AA_counts = get_frquency(seq, alphabet)
-    D_kl_dict = {k: v * log2(v/background_freq[k]) for k, v in AA_counts.items() if v != 0} 
-    D_kl = - sum(E_dict.values())
-    return D_kl 
+    KLD_dict = {k: v * log2(v/background_freq[k]) for k, v in AA_counts.items() if v != 0} 
+    KLD = sum(KLD_dict.values())
+    return KLD 
 
-def compute_KL_div_no_alignment(fasta_file, alphabet):
+
+def process_sequence(rec):
     """
-    Computes Kullback-Leibler Divergence for each seq in fasta.
-    Since there is no alignment, it uses the overall average freq of AAs as background:
-    Interate over every seq compute frequency and sum up, divide by two each time 
-    For very large files, we should include some kind of sampling I guess
+    Process a single sequence and return counts and frequencies
     """
-    seqs = SeqIO.parse(fasta_file, "fasta")
-    background_freq = 
-    for rec in seqs:
+    seq = str(rec.seq)
+    counts = get_AA_counts(seq, alphabet)
+    frequency = get_frquency(seq, alphabet)
+    return counts, frequency
+
+
+def get_background_from_fasta_no_alignment(fasta_file, alphabet, num_seqs):
+    """
+    iterates over fasta to get the AA frequencies of all seqs.
+    """
+    fasta_iterator = SeqIO.parse(fasta_file, "fasta")
+
+    # Initialize dictionaries to store counts and frequencies
+    total_frequency = {x: 0 for x in alphabet}
+
+    # Iterate over the records in the FASTA file
+    for record in fasta_iterator:
+        # Get sequence as a string
+        seq = str(record.seq)
+        
+        # Compute counts and frequencies for this sequence
+        frequency = get_frquency(seq, alphabet)
+        
+        # Accumulate counts and frequencies
+        for aa in alphabet:
+            total_frequency[aa] += frequency[aa]
+
+    # Normalize frequencies by the number of sequences
+    num_sequences = sum(1 for _ in SeqIO.parse(fasta_file, "fasta"))
+    for aa in alphabet:
+        total_frequency[aa] /= num_seqs
+    
+    return total_frequency
+
+def compute_KLD_fasta(fasta_file, alphabet, background_freq):
+    """
+    computes the KLD witht the background of the given fasta.
+    """
+
+    fasta_iterator = SeqIO.parse(fasta_file, "fasta")
+
+    KLDs = {}
+
+    for rec in fasta_iterator:
+        # get ID and seq, pack into dict as id:KLD
+        KLDs[rec.id] = compute_kullback_leibler(str(rec.seq), alphabet, background_freq)
+
+    return KLDs
+
 
 
 # %%
+
+prot_seq = "ARNDCEQGHILKMFPSTWYVARNDCEQGHILKMFPSTWYV"
+prot_seq_halfhalf = "ARNDCEQGHILKMFPSTWYVAAAAAAAAAAAAAAAAAAAA"
+prot_seq_low_comp = "MMAAAMMAAAMMAAAMMAAAMMAAAMMAAAMMAAAMMAAA"
+prot_seq_homo_rep = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+prot_seq_homo_rep_halflength = "AAAAAAAAAAAAAAAAAAAA"
+
+alphabet = [
+    'A',
+    'R',
+    'N',
+    'D',
+    'C',
+    'E',
+    'Q',
+    'G',
+    'H',
+    'I',
+    'L',
+    'K',
+    'M',
+    'F',
+    'P',
+    'S',
+    'T',
+    'W',
+    'Y',
+    'V'
+]
+
 test_fasta_path = "C:/Users/maxsp/Work/prots_test_complexity.fasta"
+num_sequences = sum(1 for _ in SeqIO.parse(test_fasta_path, "fasta"))
 
-sequences = SeqIO.parse(test_fasta_path, "fasta")
+# %%
+background = get_background_from_fasta_no_alignment(test_fasta_path, alphabet, num_sequences)
 
+# %%
+KLD = compute_KLD_fasta(test_fasta_path, alphabet, background)
