@@ -1,7 +1,7 @@
 protein_lm/dataset/ProteinGym/
 protein_lm/evaluation/output/
 /esm2*/
-/toy/
+/toy*/
 *.lock
 *.pyc
 wandb/
@@ -9,3 +9,4 @@ checkpoints/
 __pycache__/
 protein_lm.egg-info/
 *.DS_Store
+/.vs/

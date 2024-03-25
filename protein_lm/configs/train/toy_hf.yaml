@@ -41,6 +41,8 @@ model:
   nn_model_type: "APT"
   nn_model_config_args:
     position_embedding: "learned"
+    rope_scaling_factor: 1.0
+    rope_theta: 10000
     max_sequence_length: 10
   pretrained_checkpoint: null
 
